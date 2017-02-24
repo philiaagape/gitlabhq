@@ -13,7 +13,7 @@ describe SearchHelper do
       end
 
       it "it returns nil" do
-        search_autocomplete_opts("q").should be_nil
+        expect(search_autocomplete_opts("q")).to be_nil
       end
     end
 
@@ -25,29 +25,45 @@ describe SearchHelper do
       end
 
       it "includes Help sections" do
-        search_autocomplete_opts("hel").size.should == 9
+        expect(search_autocomplete_opts("hel").size).to eq(9)
       end
 
       it "includes default sections" do
-        search_autocomplete_opts("adm").size.should == 1
+        expect(search_autocomplete_opts("adm").size).to eq(1)
+      end
+
+      it "does not allow regular expression in search term" do
+        expect(search_autocomplete_opts("(webhooks|api)").size).to eq(0)
       end
 
       it "includes the user's groups" do
         create(:group).add_owner(user)
-        search_autocomplete_opts("gro").size.should == 1
+        expect(search_autocomplete_opts("gro").size).to eq(1)
+      end
+
+      it "includes nested group" do
+        create(:group, :nested, name: 'foo').add_owner(user)
+        expect(search_autocomplete_opts('foo').size).to eq(1)
       end
 
       it "includes the user's projects" do
-        project = create(:project, namespace: create(:namespace, owner: user))
-        search_autocomplete_opts(project.name).size.should == 1
+        project = create(:empty_project, namespace: create(:namespace, owner: user))
+        expect(search_autocomplete_opts(project.name).size).to eq(1)
+      end
+
+      it "does not include the public group" do
+        group = create(:group)
+        expect(search_autocomplete_opts(group.name).size).to eq(0)
       end
 
       context "with a current project" do
-        before { @project = create(:project) }
+        before do
+          @project = create(:project, :repository)
+        end
 
         it "includes project-specific sections" do
-          search_autocomplete_opts("Files").size.should == 1
-          search_autocomplete_opts("Commits").size.should == 1
+          expect(search_autocomplete_opts("Files").size).to eq(1)
+          expect(search_autocomplete_opts("Commits").size).to eq(1)
         end
       end
     end

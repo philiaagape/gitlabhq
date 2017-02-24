@@ -1,82 +1,91 @@
+- @no_container = true
+
+= content_for :meta_tags do
+  - if current_user
+    = auto_discovery_link_tag(:atom, namespace_project_path(@project.namespace, @project, format: :atom, private_token: current_user.private_token), title: "#{@project.name} activity")
+
+= content_for :flash_message do
+  - if current_user && can?(current_user, :download_code, @project)
+    = render 'shared/no_ssh'
+    = render 'shared/no_password'
+
+= render 'projects/last_push'
 = render "home_panel"
 
-.row
-  %section.col-md-9
-    = render "events/event_last_push", event: @last_push
-    = render 'shared/event_filter'
-    .content_list
-    = spinner
-  %aside.col-md-3.project-side.hidden-sm.hidden-xs
-    .clearfix
-      - if @project.archived?
-        .alert.alert-warning
-          %h4
-            %i.icon-warning-sign
-            Archived project!
-          %p Repository is read-only
+- if current_user && can?(current_user, :download_code, @project)
+  .project-stats-container{ class: container_class }
+    %nav.project-stats
+      %ul.nav
+        %li
+          = link_to project_files_path(@project) do
+            Files (#{storage_counter(@project.statistics.total_repository_size)})
+        %li
+          = link_to namespace_project_commits_path(@project.namespace, @project, current_ref) do
+            #{'Commit'.pluralize(@project.statistics.commit_count)} (#{number_with_delimiter(@project.statistics.commit_count)})
+        %li
+          = link_to namespace_project_branches_path(@project.namespace, @project) do
+            #{'Branch'.pluralize(@repository.branch_count)} (#{number_with_delimiter(@repository.branch_count)})
+        %li
+          = link_to namespace_project_tags_path(@project.namespace, @project) do
+            #{'Tag'.pluralize(@repository.tag_count)} (#{number_with_delimiter(@repository.tag_count)})
 
-      - if @project.forked_from_project
-        .alert.alert-success
-          %i.icon-code-fork.project-fork-icon
-          Forked from:
-          %br
-          = link_to @project.forked_from_project.name_with_namespace, project_path(@project.forked_from_project)
+        - if default_project_view != 'readme' && @repository.readme
+          %li
+            = link_to 'Readme', readme_path(@project)
 
-      .star-buttons
-        %span.star.js-toggler-container{class: @show_star ? 'on' : ''}
-          - if current_user
-            = link_to_toggle_star('Star this project.', false, true)
-            = link_to_toggle_star('Unstar this project.', true, true)
-          - else
-            = link_to_toggle_star('You must sign in to star a project.', false, false)
+        - if @repository.changelog
+          %li
+            = link_to 'Changelog', changelog_path(@project)
 
-      - unless @project.empty_repo?
-        .fork-buttons
-          - if current_user && can?(current_user, :fork_project, @project) && @project.namespace != current_user.namespace
-            - if current_user.already_forked?(@project)
-              = link_to project_path(current_user.fork_of(@project)), class: 'btn btn-block' do
-                %i.icon-compass
-                Go to fork
-                %span.count
-                  = @project.forks_count
-            - else
-              = link_to fork_project_path(@project), title: "Fork", class: "btn btn-block", method: "POST" do
-                %i.icon-code-fork
-                Fork repository
-                %span.count
-                  = @project.forks_count
-      - unless @project.empty_repo?
-        - if can? current_user, :download_code, @project
-          = render 'projects/repositories/download_archive', btn_class: 'btn-block btn-group-justified', split_button: true
+        - if @repository.license_blob
+          %li
+            = link_to license_short_name(@project), license_path(@project)
 
-        = link_to project_compare_index_path(@project, from: @repository.root_ref, to: @ref || @repository.root_ref), class: 'btn btn-block' do
-          Compare code
+        - if @repository.contribution_guide
+          %li
+            = link_to 'Contribution guide', contribution_guide_path(@project)
 
-        - if @repository.readme
-          - readme = @repository.readme
-          = link_to project_blob_path(@project, tree_join(@repository.root_ref, readme.name)), class: 'btn btn-block' do
-            = readme.name
+        - if @repository.gitlab_ci_yml
+          %li
+            = link_to 'CI configuration', ci_configuration_path(@project)
 
-        - if @repository.version
-          - version = @repository.version
-          = link_to project_blob_path(@project, tree_join(@repository.root_ref, version.name)), class: 'btn btn-block' do
-            Version:
-            %span.count
-              = @repository.blob_by_oid(version.id).data
+        - if current_user && can_push_branch?(@project, @project.default_branch)
+          - unless @repository.changelog
+            %li.missing
+              = link_to add_special_file_path(@project, file_name: 'CHANGELOG') do
+                Add Changelog
+          - unless @repository.license_blob
+            %li.missing
+              = link_to add_special_file_path(@project, file_name: 'LICENSE') do
+                Add License
+          - unless @repository.contribution_guide
+            %li.missing
+              = link_to add_special_file_path(@project, file_name: 'CONTRIBUTING.md', commit_message: 'Add contribution guide') do
+                Add Contribution guide
+          - unless @repository.gitlab_ci_yml
+            %li.missing
+              = link_to add_special_file_path(@project, file_name: '.gitlab-ci.yml') do
+                Set up CI
+          - if koding_enabled? && @repository.koding_yml.blank?
+            %li.missing
+              = link_to 'Set up Koding', add_koding_stack_path(@project)
+          - if @repository.gitlab_ci_yml.blank? && @project.deployment_service.present?
+            %li.missing
+              = link_to add_special_file_path(@project, file_name: '.gitlab-ci.yml', commit_message: 'Set up auto deploy', target_branch: 'auto-deploy', context: 'autodeploy') do
+                Set up auto deploy
 
-    .prepend-top-10
+    - if @repository.commit
+      .project-last-commit
+        = render 'projects/last_commit', commit: @repository.commit, ref: current_ref, project: @project
+
+%div{ class: container_class }
+  - if @project.archived?
+    .text-warning.center.prepend-top-20
       %p
-        %span.light Created on
-        #{@project.created_at.stamp('Aug 22, 2013')}
-      %p
-        %span.light Owned by
-        - if @project.group
-          #{link_to @project.group.name, @project.group} group
-        - else
-          #{link_to @project.owner_name, @project.owner}
+        = icon("exclamation-triangle fw")
+        Archived project! Repository is read-only
 
+  - view_path = default_project_view
 
-      - if @project.gitlab_ci?
-        %hr
-        = link_to @project.gitlab_ci_service.builds_path do
-          = image_tag @project.gitlab_ci_service.status_img_path, alt: "build status"
+  %div{ class: project_child_container_class(view_path) }
+    = render view_path

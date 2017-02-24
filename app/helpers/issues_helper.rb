@@ -1,5 +1,5 @@
 module IssuesHelper
-  def issue_css_classes issue
+  def issue_css_classes(issue)
     classes = "issue"
     classes << " closed" if issue.closed?
     classes << " today" if issue.today?
@@ -13,91 +13,155 @@ module IssuesHelper
     OpenStruct.new(id: 0, title: 'None (backlog)', name: 'Unassigned')
   end
 
-  def url_for_project_issues(project = @project)
+  def url_for_issue(issue_iid, project = @project, options = {})
     return '' if project.nil?
 
-    if project.used_default_issues_tracker? || !external_issues_tracker_enabled?
-      project_issues_path(project)
-    else
-      url = Gitlab.config.issues_tracker[project.issues_tracker]['project_url']
-      url.gsub(':project_id', project.id.to_s).
-          gsub(':issues_tracker_id', project.issues_tracker_id.to_s)
-    end
-  end
+    url =
+      if options[:only_path]
+        project.issues_tracker.issue_path(issue_iid)
+      else
+        project.issues_tracker.issue_url(issue_iid)
+      end
 
-  def url_for_new_issue(project = @project)
-    return '' if project.nil?
-
-    if project.used_default_issues_tracker? || !external_issues_tracker_enabled?
-      url = new_project_issue_path project_id: project
-    else
-      issues_tracker = Gitlab.config.issues_tracker[project.issues_tracker]
-      url = issues_tracker['new_issue_url']
-      url.gsub(':project_id', project.id.to_s).
-          gsub(':issues_tracker_id', project.issues_tracker_id.to_s)
-    end
-  end
-
-  def url_for_issue(issue_iid, project = @project)
-    return '' if project.nil?
-
-    if project.used_default_issues_tracker? || !external_issues_tracker_enabled?
-      url = project_issue_url project_id: project, id: issue_iid
-    else
-      url = Gitlab.config.issues_tracker[project.issues_tracker]['issues_url']
-      url.gsub(':id', issue_iid.to_s).
-          gsub(':project_id', project.id.to_s).
-          gsub(':issues_tracker_id', project.issues_tracker_id.to_s)
-    end
-  end
-
-  def title_for_issue(issue_iid, project = @project)
-    return '' if project.nil?
-
-    if project.used_default_issues_tracker?
-      issue = project.issues.where(iid: issue_iid).first
-      return issue.title if issue
-    end
-
+    # Ensure we return a valid URL to prevent possible XSS.
+    URI.parse(url).to_s
+  rescue URI::InvalidURIError
     ''
   end
 
-  # Checks if issues_tracker setting exists in gitlab.yml
-  def external_issues_tracker_enabled?
-    Gitlab.config.issues_tracker && Gitlab.config.issues_tracker.values.any?
-  end
-
   def bulk_update_milestone_options
-    options_for_select(['None (backlog)']) +
-        options_from_collection_for_select(project_active_milestones, 'id',
-                                           'title', params[:milestone_id])
+    milestones = @project.milestones.active.reorder(due_date: :asc, title: :asc).to_a
+    milestones.unshift(Milestone::None)
+
+    options_from_collection_for_select(milestones, 'id', 'title', params[:milestone_id])
   end
 
-  def bulk_update_assignee_options(project = @project)
-    options_for_select(['None (unassigned)']) +
-        options_from_collection_for_select(project.team.members, 'id',
-                                           'name', params[:assignee_id])
+  def milestone_options(object)
+    milestones = object.project.milestones.active.reorder(due_date: :asc, title: :asc).to_a
+    milestones.unshift(object.milestone) if object.milestone.present? && object.milestone.closed?
+    milestones.unshift(Milestone::None)
+
+    options_from_collection_for_select(milestones, 'id', 'title', object.milestone_id)
   end
 
-  def assignee_options(object, project = @project)
-    options_from_collection_for_select(project.team.members.sort_by(&:name),
-                                       'id', 'name', object.assignee_id)
+  def project_options(issuable, current_user, ability: :read_project)
+    projects = current_user.authorized_projects
+    projects = projects.select do |project|
+      current_user.can?(ability, project)
+    end
+
+    no_project = OpenStruct.new(id: 0, name_with_namespace: 'No project')
+    projects.unshift(no_project)
+    projects.delete(issuable.project)
+
+    options_from_collection_for_select(projects, :id, :name_with_namespace)
   end
 
-  def milestone_options object
-    options_from_collection_for_select(object.project.milestones.active,
-                                       'id', 'title', object.milestone_id)
-  end
-
-  def issue_box_class(item)
-    if item.respond_to?(:expired?) && item.expired?
-      'issue-box-expired'
-    elsif item.respond_to?(:merged?) && item.merged?
-      'issue-box-merged'
+  def status_box_class(item)
+    if item.try(:expired?)
+      'status-box-expired'
+    elsif item.try(:merged?)
+      'status-box-merged'
     elsif item.closed?
-      'issue-box-closed'
+      'status-box-closed'
+    elsif item.try(:upcoming?)
+      'status-box-upcoming'
     else
-      'issue-box-open'
+      'status-box-open'
     end
   end
+
+  def issue_button_visibility(issue, closed)
+    return 'hidden' if issue.closed? == closed
+  end
+
+  def merge_requests_sentence(merge_requests)
+    # Sorting based on the `!123` or `group/project!123` reference will sort
+    # local merge requests first.
+    merge_requests.map do |merge_request|
+      merge_request.to_reference(@project)
+    end.sort.to_sentence(last_word_connector: ', or ')
+  end
+
+  def confidential_icon(issue)
+    icon('eye-slash') if issue.confidential?
+  end
+
+  def emoji_icon(name, unicode = nil, aliases = [], sprite: true)
+    unicode ||= Gitlab::Emoji.emoji_filename(name) rescue ""
+
+    data = {
+      aliases: aliases.join(" "),
+      emoji: name,
+      unicode_name: unicode
+    }
+
+    if sprite
+      # Emoji icons for the emoji menu, these use a spritesheet.
+      content_tag :div, "",
+        class: "icon emoji-icon emoji-#{unicode}",
+        title: name,
+        data: data
+    else
+      # Emoji icons displayed separately, used for the awards already given
+      # to an issue or merge request.
+      content_tag :img, "",
+        class: "icon emoji",
+        title: name,
+        height: "20px",
+        width: "20px",
+        src: url_to_image("#{unicode}.png"),
+        data: data
+    end
+  end
+
+  def award_user_list(awards, current_user, limit: 10)
+    names = awards.map do |award|
+      award.user == current_user ? 'You' : award.user.name
+    end
+
+    current_user_name = names.delete('You')
+    names = names.insert(0, current_user_name).compact.first(limit)
+
+    names << "#{awards.size - names.size} more." if awards.size > names.size
+
+    names.to_sentence
+  end
+
+  def award_state_class(awards, current_user)
+    if !current_user
+      "disabled"
+    elsif current_user && awards.find { |a| a.user_id == current_user.id }
+      "active"
+    else
+      ""
+    end
+  end
+
+  def awards_sort(awards)
+    awards.sort_by do |award, notes|
+      if award == "thumbsup"
+        0
+      elsif award == "thumbsdown"
+        1
+      else
+        2
+      end
+    end.to_h
+  end
+
+  def due_date_options
+    options = [
+      Issue::AnyDueDate,
+      Issue::NoDueDate,
+      Issue::DueThisWeek,
+      Issue::DueThisMonth,
+      Issue::Overdue
+    ]
+
+    options_from_collection_for_select(options, 'name', 'title', params[:due_date])
+  end
+
+  # Required for Banzai::Filter::IssueReferenceFilter
+  module_function :url_for_issue
 end

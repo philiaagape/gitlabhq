@@ -1,95 +1,19 @@
-class GroupMilestone
+class GroupMilestone < GlobalMilestone
+  attr_accessor :group
 
-  def initialize(title, milestones)
-    @title = title
-    @milestones = milestones
-  end
-
-  def title
-    @title
-  end
-
-  def safe_title
-    @title.parameterize
-  end
-
-  def milestones
-    @milestones
-  end
-
-  def projects
-    milestones.map { |milestone| milestone.project }
-  end
-
-  def issue_count
-    milestones.map { |milestone| milestone.issues.count }.sum
-  end
-
-  def merge_requests_count
-    milestones.map { |milestone| milestone.merge_requests.count }.sum
-  end
-
-  def open_items_count
-    milestones.map { |milestone| milestone.open_items_count }.sum
-  end
-
-  def closed_items_count
-    milestones.map { |milestone| milestone.closed_items_count }.sum
-  end
-
-  def total_items_count
-    milestones.map { |milestone| milestone.total_items_count }.sum
-  end
-
-  def percent_complete
-    ((closed_items_count * 100) / total_items_count).abs
-  rescue ZeroDivisionError
-    100
-  end
-
-  def state
-    state = milestones.map { |milestone| milestone.state }
-
-    if state.count('closed') == state.size
-      'closed'
-    else
-      'active'
+  def self.build_collection(group, projects, params)
+    super(projects, params).each do |milestone|
+      milestone.group = group
     end
   end
 
-  def active?
-    state == 'active'
+  def self.build(group, projects, title)
+    super(projects, title).tap do |milestone|
+      milestone&.group = group
+    end
   end
 
-  def closed?
-    state == 'closed'
-  end
-
-  def issues
-    @group_issues ||= milestones.map { |milestone| milestone.issues }.flatten.group_by(&:state)
-  end
-
-  def merge_requests
-    @group_merge_requests ||= milestones.map { |milestone| milestone.merge_requests }.flatten.group_by(&:state)
-  end
-
-  def participants
-    milestones.map { |milestone| milestone.participants.uniq }.reject(&:empty?).flatten
-  end
-
-  def opened_issues
-    issues.values_at("opened", "reopened").compact.flatten
-  end
-
-  def closed_issues
-    issues['closed']
-  end
-
-  def opened_merge_requests
-    merge_requests.values_at("opened", "reopened").compact.flatten
-  end
-
-  def closed_merge_requests
-    merge_requests.values_at("closed", "merged", "locked").compact.flatten
+  def issues_finder_params
+    { group_id: group.id }
   end
 end

@@ -1,10 +1,12 @@
 namespace :gitlab do
-  desc "GITLAB | Run all tests"
+  desc "GitLab | Run all tests"
   task :test do
     cmds = [
+      %W(rake brakeman),
+      %W(rake rubocop),
       %W(rake spinach),
       %W(rake spec),
-      %W(rake jasmine:ci)
+      %W(rake karma)
     ]
 
     cmds.each do |cmd|

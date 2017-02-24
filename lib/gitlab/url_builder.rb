@@ -1,25 +1,72 @@
 module Gitlab
   class UrlBuilder
-    include Rails.application.routes.url_helpers
+    include Gitlab::Routing.url_helpers
+    include GitlabRoutingHelper
+    include ActionView::RecordIdentifier
 
-    def initialize(type)
-      @type = type
+    attr_reader :object
+
+    def self.build(object)
+      new(object).url
     end
 
-    def build(id)
-      case @type
-      when :issue
-        issue_url(id)
+    def url
+      case object
+      when Commit
+        commit_url
+      when Issue
+        issue_url(object)
+      when MergeRequest
+        merge_request_url(object)
+      when Note
+        note_url
+      when WikiPage
+        wiki_page_url
+      when ProjectSnippet
+        project_snippet_url(object)
+      when Snippet
+        personal_snippet_url(object)
+      else
+        raise NotImplementedError.new("No URL builder defined for #{object.class}")
       end
     end
 
     private
 
-    def issue_url(id)
-      issue = Issue.find(id)
-      project_issue_url(id: issue.iid,
-                        project_id: issue.project,
-                        host: Settings.gitlab['url'])
+    def initialize(object)
+      @object = object
+    end
+
+    def commit_url(opts = {})
+      return '' if object.project.nil?
+
+      namespace_project_commit_url({
+        namespace_id: object.project.namespace,
+        project_id: object.project,
+        id: object.id
+      }.merge!(opts))
+    end
+
+    def note_url
+      if object.for_commit?
+        commit_url(id: object.commit_id, anchor: dom_id(object))
+
+      elsif object.for_issue?
+        issue = Issue.find(object.noteable_id)
+        issue_url(issue, anchor: dom_id(object))
+
+      elsif object.for_merge_request?
+        merge_request = MergeRequest.find(object.noteable_id)
+        merge_request_url(merge_request, anchor: dom_id(object))
+
+      elsif object.for_snippet?
+        snippet = Snippet.find(object.noteable_id)
+        project_snippet_url(snippet, anchor: dom_id(object))
+      end
+    end
+
+    def wiki_page_url
+      namespace_project_wiki_url(object.wiki.project.namespace, object.wiki.project, object.slug)
     end
   end
 end

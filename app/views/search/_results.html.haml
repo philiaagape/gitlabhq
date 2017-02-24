@@ -1,17 +1,25 @@
-%h4
-  #{@search_results[:total_results]} results found
-  - if @project
-    for #{link_to @project.name_with_namespace, @project}
-  - elsif @group
-    for #{link_to @group.name, @group}
-
-%hr
-
-- if @project
-  = render "project_results"
+- if @search_objects.empty?
+  = render partial: "search/results/empty"
 - else
-  = render "global_results"
+  .row-content-block
+    = search_entries_info(@search_objects, @scope, @search_term)
+    - unless @show_snippets
+      - if @project
+        in project #{link_to @project.name_with_namespace, [@project.namespace.becomes(Namespace), @project]}
+      - elsif @group
+        in group #{link_to @group.name, @group}
 
-:javascript
-  $(".search_results .term").highlight("#{escape_javascript(params[:search])}");
+  .results.prepend-top-10
+    - if @scope == 'commits'
+      %ul.content-list.commit-list.table-list.table-wide
+        = render partial: "search/results/commit", collection: @search_objects
+    - else
+      .search-results
+        - if @scope == 'projects'
+          .term
+            = render 'shared/projects/list', projects: @search_objects
+        - else
+          = render partial: "search/results/#{@scope.singularize}", collection: @search_objects
 
+    - if @scope != 'projects'
+      = paginate(@search_objects, theme: 'gitlab')

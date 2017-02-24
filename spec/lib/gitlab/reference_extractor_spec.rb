@@ -1,101 +1,230 @@
 require 'spec_helper'
 
-describe Gitlab::ReferenceExtractor do
-  it 'extracts username references' do
-    subject.analyze "this contains a @user reference"
-    subject.users.should == ["user"]
+describe Gitlab::ReferenceExtractor, lib: true do
+  let(:project) { create(:empty_project) }
+
+  before do
+    project.team << [project.creator, :developer]
   end
 
-  it 'extracts issue references' do
-    subject.analyze "this one talks about issue #1234"
-    subject.issues.should == ["1234"]
+  subject { Gitlab::ReferenceExtractor.new(project, project.creator) }
+
+  it 'accesses valid user objects' do
+    @u_foo = create(:user, username: 'foo')
+    @u_bar = create(:user, username: 'bar')
+    @u_offteam = create(:user, username: 'offteam')
+
+    project.team << [@u_foo, :reporter]
+    project.team << [@u_bar, :guest]
+
+    subject.analyze('@foo, @baduser, @bar, and @offteam')
+    expect(subject.users).to match_array([@u_foo, @u_bar, @u_offteam])
   end
 
-  it 'extracts JIRA issue references' do
-    Gitlab.config.gitlab.stub(:issues_tracker).and_return("jira")
-    subject.analyze "this one talks about issue JIRA-1234"
-    subject.issues.should == ["JIRA-1234"]
+  it 'ignores user mentions inside specific elements' do
+    @u_foo = create(:user, username: 'foo')
+    @u_bar = create(:user, username: 'bar')
+    @u_offteam = create(:user, username: 'offteam')
+
+    project.team << [@u_foo, :reporter]
+    project.team << [@u_bar, :guest]
+
+    subject.analyze(%Q{
+      Inline code: `@foo`
+
+      Code block:
+
+      ```
+      @bar
+      ```
+
+      Quote:
+
+      > @offteam
+    })
+
+    expect(subject.users).to match_array([])
   end
 
-  it 'extracts merge request references' do
-    subject.analyze "and here's !43, a merge request"
-    subject.merge_requests.should == ["43"]
-  end
+  describe 'directly addressed users' do
+    before do
+      @u_foo  = create(:user, username: 'foo')
+      @u_foo2 = create(:user, username: 'foo2')
+      @u_foo3 = create(:user, username: 'foo3')
+      @u_foo4 = create(:user, username: 'foo4')
+      @u_foo5 = create(:user, username: 'foo5')
 
-  it 'extracts snippet ids' do
-    subject.analyze "snippets like $12 get extracted as well"
-    subject.snippets.should == ["12"]
-  end
+      @u_bar  = create(:user, username: 'bar')
+      @u_bar2 = create(:user, username: 'bar2')
+      @u_bar3 = create(:user, username: 'bar3')
+      @u_bar4 = create(:user, username: 'bar4')
 
-  it 'extracts commit shas' do
-    subject.analyze "commit shas 98cf0ae3 are pulled out as Strings"
-    subject.commits.should == ["98cf0ae3"]
-  end
-
-  it 'extracts multiple references and preserves their order' do
-    subject.analyze "@me and @you both care about this"
-    subject.users.should == ["me", "you"]
-  end
-
-  it 'leaves the original note unmodified' do
-    text = "issue #123 is just the worst, @user"
-    subject.analyze text
-    text.should == "issue #123 is just the worst, @user"
-  end
-
-  it 'handles all possible kinds of references' do
-    accessors = Gitlab::Markdown::TYPES.map { |t| "#{t}s".to_sym }
-    subject.should respond_to(*accessors)
-  end
-
-  context 'with a project' do
-    let(:project) { create(:project) }
-
-    it 'accesses valid user objects on the project team' do
-      @u_foo = create(:user, username: 'foo')
-      @u_bar = create(:user, username: 'bar')
-      create(:user, username: 'offteam')
-
-      project.team << [@u_foo, :reporter]
-      project.team << [@u_bar, :guest]
-
-      subject.analyze "@foo, @baduser, @bar, and @offteam"
-      subject.users_for(project).should == [@u_foo, @u_bar]
+      @u_tom  = create(:user, username: 'tom')
+      @u_tom2 = create(:user, username: 'tom2')
     end
 
-    it 'accesses valid issue objects' do
-      @i0 = create(:issue, project: project)
-      @i1 = create(:issue, project: project)
+    context 'when a user is directly addressed' do
+      it 'accesses the user object which is mentioned in the beginning of the line' do
+        subject.analyze('@foo What do you think? cc: @bar, @tom')
 
-      subject.analyze "##{@i0.iid}, ##{@i1.iid}, and #999."
-      subject.issues_for(project).should == [@i0, @i1]
+        expect(subject.directly_addressed_users).to match_array([@u_foo])
+      end
+
+      it "doesn't access the user object if it's not mentioned in the beginning of the line" do
+        subject.analyze('What do you think? cc: @bar')
+
+        expect(subject.directly_addressed_users).to be_empty
+      end
     end
 
-    it 'accesses valid merge requests' do
-      @m0 = create(:merge_request, source_project: project, target_project: project, source_branch: 'aaa')
-      @m1 = create(:merge_request, source_project: project, target_project: project, source_branch: 'bbb')
+    context 'when multiple users are addressed' do
+      it 'accesses the user objects which are mentioned in the beginning of the line' do
+        subject.analyze('@foo @bar What do you think? cc: @tom')
 
-      subject.analyze "!999, !#{@m1.iid}, and !#{@m0.iid}."
-      subject.merge_requests_for(project).should == [@m1, @m0]
+        expect(subject.directly_addressed_users).to match_array([@u_foo, @u_bar])
+      end
+
+      it "doesn't access the user objects if they are not mentioned in the beginning of the line" do
+        subject.analyze('What do you think? cc: @foo @bar @tom')
+
+        expect(subject.directly_addressed_users).to be_empty
+      end
     end
 
-    it 'accesses valid snippets' do
-      @s0 = create(:project_snippet, project: project)
-      @s1 = create(:project_snippet, project: project)
-      @s2 = create(:project_snippet)
+    context 'when multiple users are addressed in different paragraphs' do
+      it 'accesses user objects which are mentioned in the beginning of each paragraph' do
+        subject.analyze <<-NOTE.strip_heredoc
+          @foo What do you think? cc: @tom
 
-      subject.analyze "$#{@s0.id}, $999, $#{@s2.id}, $#{@s1.id}"
-      subject.snippets_for(project).should == [@s0, @s1]
+          - @bar can you please have a look?
+
+          >>>
+          @foo2 what do you think? cc: @bar2
+          >>>
+
+          @foo3 @foo4 thank you!
+
+          > @foo5 well done!
+
+          1. @bar3 Can you please check? cc: @tom2
+          2. @bar4 What do you this of this MR?
+        NOTE
+
+        expect(subject.directly_addressed_users).to match_array([@u_foo, @u_foo3, @u_foo4])
+      end
+    end
+  end
+
+  it 'accesses valid issue objects' do
+    @i0 = create(:issue, project: project)
+    @i1 = create(:issue, project: project)
+
+    subject.analyze("#{@i0.to_reference}, #{@i1.to_reference}, and #{Issue.reference_prefix}999.")
+
+    expect(subject.issues).to match_array([@i0, @i1])
+  end
+
+  it 'accesses valid merge requests' do
+    @m0 = create(:merge_request, source_project: project, target_project: project, source_branch: 'markdown')
+    @m1 = create(:merge_request, source_project: project, target_project: project, source_branch: 'feature_conflict')
+
+    subject.analyze("!999, !#{@m1.iid}, and !#{@m0.iid}.")
+
+    expect(subject.merge_requests).to match_array([@m1, @m0])
+  end
+
+  it 'accesses valid labels' do
+    @l0 = create(:label, title: 'one', project: project)
+    @l1 = create(:label, title: 'two', project: project)
+    @l2 = create(:label)
+
+    subject.analyze("~#{@l0.id}, ~999, ~#{@l2.id}, ~#{@l1.id}")
+
+    expect(subject.labels).to match_array([@l0, @l1])
+  end
+
+  it 'accesses valid snippets' do
+    @s0 = create(:project_snippet, project: project)
+    @s1 = create(:project_snippet, project: project)
+    @s2 = create(:project_snippet)
+
+    subject.analyze("$#{@s0.id}, $999, $#{@s2.id}, $#{@s1.id}")
+
+    expect(subject.snippets).to match_array([@s0, @s1])
+  end
+
+  it 'accesses valid commits' do
+    project = create(:project, :repository) { |p| p.add_developer(p.creator) }
+    commit = project.commit('master')
+
+    extractor = described_class.new(project, project.creator)
+    extractor.analyze("this references commits #{commit.sha[0..6]} and 012345")
+    extracted = extractor.commits
+
+    expect(extracted.size).to eq(1)
+    expect(extracted[0].sha).to eq(commit.sha)
+    expect(extracted[0].message).to eq(commit.message)
+  end
+
+  it 'accesses valid commit ranges' do
+    project = create(:project, :repository) { |p| p.add_developer(p.creator) }
+    commit = project.commit('master')
+    earlier_commit = project.commit('master~2')
+
+    extractor = described_class.new(project, project.creator)
+    extractor.analyze("this references commits #{earlier_commit.sha[0..6]}...#{commit.sha[0..6]}")
+    extracted = extractor.commit_ranges
+
+    expect(extracted.size).to eq(1)
+    expect(extracted.first).to be_kind_of(CommitRange)
+    expect(extracted.first.commit_from).to eq earlier_commit
+    expect(extracted.first.commit_to).to eq commit
+  end
+
+  context 'with an external issue tracker' do
+    let(:project) { create(:jira_project) }
+
+    it 'returns JIRA issues for a JIRA-integrated project' do
+      subject.analyze('JIRA-123 and FOOBAR-4567')
+      expect(subject.issues).to eq [ExternalIssue.new('JIRA-123', project),
+                                    ExternalIssue.new('FOOBAR-4567', project)]
+    end
+  end
+
+  context 'with a project with an underscore' do
+    let(:other_project) { create(:empty_project, path: 'test_project') }
+    let(:issue) { create(:issue, project: other_project) }
+
+    before do
+      other_project.team << [project.creator, :developer]
     end
 
-    it 'accesses valid commits' do
-      commit = project.repository.commit("master")
+    it 'handles project issue references' do
+      subject.analyze("this refers issue #{issue.to_reference(project)}")
 
-      subject.analyze "this references commits #{commit.sha[0..6]} and 012345"
-      extracted = subject.commits_for(project)
-      extracted.should have(1).item
-      extracted[0].sha.should == commit.sha
-      extracted[0].message.should == commit.message
+      extracted = subject.issues
+      expect(extracted.size).to eq(1)
+      expect(extracted).to match_array([issue])
     end
+  end
+
+  describe '#all' do
+    let(:issue) { create(:issue, project: project) }
+    let(:label) { create(:label, project: project) }
+    let(:text) { "Ref. #{issue.to_reference} and #{label.to_reference}" }
+
+    before do
+      project.team << [project.creator, :developer]
+      subject.analyze(text)
+    end
+
+    it 'returns all referables' do
+      expect(subject.all).to match_array([issue, label])
+    end
+  end
+
+  describe '.references_pattern' do
+    subject { described_class.references_pattern }
+    it { is_expected.to be_kind_of Regexp }
   end
 end

@@ -1,12 +1,12 @@
-%div{xmlns: "http://www.w3.org/1999/xhtml"}
+%div{ xmlns: "http://www.w3.org/1999/xhtml" }
   - event.commits.first(15).each do |commit|
     %p
       %strong= commit[:author][:name]
-      = link_to "(##{commit[:id][0...8]})", project_commit_path(event.project, id: commit[:id])
+      = link_to "(##{truncate_sha(commit[:id])})", namespace_project_commit_path(event.project.namespace, event.project, id: commit[:id])
       %i
         at
         = commit[:timestamp].to_time.to_s(:short)
-    %blockquote= markdown(escape_once(commit[:message]))
+    %blockquote= markdown(escape_once(commit[:message]), pipeline: :atom, project: event.project, author: event.author)
   - if event.commits_count > 15
     %p
       %i

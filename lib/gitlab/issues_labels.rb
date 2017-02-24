@@ -15,12 +15,11 @@ module Gitlab
           { title: "support", color: yellow },
           { title: "discussion", color: blue },
           { title: "suggestion", color: blue },
-          { title: "feature", color: green },
           { title: "enhancement", color: green }
         ]
 
-        labels.each do |label|
-          project.labels.create(label)
+        labels.each do |params|
+          ::Labels::FindOrCreateService.new(nil, project, params).execute(skip_authorization: true)
         end
       end
     end

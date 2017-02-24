@@ -1,27 +1,37 @@
-= render 'nav'
-.row
-  .col-sm-6
-    %h3.page-title
-      Git access for
+- @no_container = true
+- page_title "Git Access", "Wiki"
+
+%div{ class: container_class }
+  .wiki-page-header.has-sidebar-toggle
+    %button.btn.btn-default.visible-xs.visible-sm.pull-right.sidebar-toggle.js-sidebar-wiki-toggle{ role: "button", type: "button" }
+      = icon('angle-double-left')
+
+    .git-access-header
+      Clone repository
       %strong= @project_wiki.path_with_namespace
 
-  .col-sm-6
     = render "shared/clone_panel", project: @project_wiki
 
-.git-empty
-  %fieldset
-    %legend Install Gollum:
+  .wiki-git-access
+    %h3 Install Gollum
     %pre.dark
       :preserve
         gem install gollum
+    %p
+      It is recommended to install
+      %code github-markdown
+      so that GFM features render locally:
+    %pre.dark
+      :preserve
+        gem install github-markdown
 
-    %legend Clone Your Wiki:
+    %h3 Clone your wiki
     %pre.dark
       :preserve
         git clone #{ content_tag(:span, default_url_to_repo(@project_wiki), class: 'clone')}
-        cd #{@project_wiki.path}
+        cd #{h @project_wiki.path}
 
-    %legend Start Gollum And Edit Locally:
+    %h3 Start Gollum and edit locally
     %pre.dark
       :preserve
         gollum
@@ -29,3 +39,5 @@
         >> Thin web server (v1.5.0 codename Knife)
         >> Maximum connections set to 1024
         >> Listening on 0.0.0.0:4567, CTRL+C to stop
+
+= render 'sidebar'

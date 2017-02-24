@@ -1,48 +1,44 @@
 class Projects::HooksController < Projects::ApplicationController
   # Authorize
-  before_filter :authorize_admin_project!
+  before_action :authorize_admin_project!
 
   respond_to :html
 
   layout "project_settings"
 
-  def index
-    @hooks = @project.hooks
-    @hook = ProjectHook.new
-  end
-
   def create
     @hook = @project.hooks.new(hook_params)
     @hook.save
 
-    if @hook.valid?
-      redirect_to project_hooks_path(@project)
-    else
+    unless @hook.valid?      
       @hooks = @project.hooks.select(&:persisted?)
-      render :index
+      flash[:alert] = @hook.errors.full_messages.join.html_safe
     end
+    redirect_to namespace_project_settings_integrations_path(@project.namespace, @project)
   end
 
   def test
     if !@project.empty_repo?
-      status = TestHookService.new.execute(hook, current_user)
-      if status
-        flash[:notice] = 'Hook successfully executed.'
+      status, message = TestHookService.new.execute(hook, current_user)
+
+      if status && status >= 200 && status < 400
+        flash[:notice] = "Hook executed successfully: HTTP #{status}"
+      elsif status
+        flash[:alert] = "Hook executed successfully but returned HTTP #{status} #{message}"
       else
-        flash[:alert] = 'Hook execution failed. '\
-                        'Ensure hook URL is correct and service is up.'
+        flash[:alert] = "Hook execution failed: #{message}"
       end
     else
       flash[:alert] = 'Hook execution failed. Ensure the project has commits.'
     end
 
-    redirect_to :back
+    redirect_back_or_default(default: { action: 'index' })
   end
 
   def destroy
     hook.destroy
 
-    redirect_to project_hooks_path(@project)
+    redirect_to namespace_project_settings_integrations_path(@project.namespace, @project)
   end
 
   private
@@ -52,6 +48,19 @@ class Projects::HooksController < Projects::ApplicationController
   end
 
   def hook_params
-    params.require(:hook).permit(:url, :push_events, :issues_events, :merge_requests_events, :tag_push_events)
+    params.require(:hook).permit(
+      :build_events,
+      :pipeline_events,
+      :enable_ssl_verification,
+      :issues_events,
+      :confidential_issues_events,
+      :merge_requests_events,
+      :note_events,
+      :push_events,
+      :tag_push_events,
+      :token,
+      :url,
+      :wiki_page_events
+    )
   end
 end

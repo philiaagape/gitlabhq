@@ -1,18 +1,28 @@
-%h3.page-title
-  Issues
-
-%p.light
-  Only issues from
-  %strong #{@group.name}
-  group are listed here.
+- page_title "Issues"
+= content_for :meta_tags do
   - if current_user
-    To see all issues you should visit #{link_to 'dashboard', issues_dashboard_path} page.
-%hr
+    = auto_discovery_link_tag(:atom, url_for(params.merge(format: :atom, private_token: current_user.private_token)), title: "#{@group.name} issues")
 
-.row
-  .fixed.sidebar-expand-button.hidden-lg.hidden-md
-    %i.icon-list.icon-2x
-  .col-md-3.responsive-side
-    = render 'shared/filter', entity: 'issue'
-  .col-md-9
-    = render 'shared/issues'
+- if group_issues(@group).exists?
+  .top-area
+    = render 'shared/issuable/nav', type: :issues
+    - if current_user
+      .nav-controls
+        = link_to url_for(params.merge(format: :atom, private_token: current_user.private_token)), class: 'btn' do
+          = icon('rss')
+          %span.icon-label
+            Subscribe
+        = render 'shared/new_project_item_select', path: 'issues/new', label: "New Issue"
+
+  = render 'shared/issuable/filter', type: :issues
+
+  .row-content-block.second-block
+    Only issues from the
+    %strong= @group.name
+    group are listed here.
+    - if current_user
+      To see all issues you should visit #{link_to 'dashboard', issues_dashboard_path} page.
+
+  = render 'shared/issues'
+- else
+  = render 'shared/empty_states/issues', project_select_button: true

@@ -1,89 +1,83 @@
-class Dashboard < Spinach::FeatureSteps
+class Spinach::Features::Dashboard < Spinach::FeatureSteps
   include SharedAuthentication
   include SharedPaths
   include SharedProject
+  include SharedIssuable
 
-  Then 'I should see "New Project" link' do
-    page.should have_link "New project"
+  step 'I should see "New Project" link' do
+    expect(page).to have_link "New project"
   end
 
-  Then 'I should see "Shop" project link' do
-    page.should have_link "Shop"
+  step 'I should see "Shop" project link' do
+    expect(page).to have_link "Shop"
   end
 
-  Then 'I should see last push widget' do
-    page.should have_content "You pushed to fix"
-    page.should have_link "Create Merge Request"
+  step 'I should see "Shop" project CI status' do
+    expect(page).to have_link "Commit: skipped"
   end
 
-  And 'I click "Create Merge Request" link' do
+  step 'I should see last push widget' do
+    expect(page).to have_content "You pushed to fix"
+    expect(page).to have_link "Create Merge Request"
+  end
+
+  step 'I click "Create Merge Request" link' do
     click_link "Create Merge Request"
   end
 
-  Then 'I see prefilled new Merge Request page' do
-    current_path.should == new_project_merge_request_path(@project)
-    find("#merge_request_target_project_id").value.should == @project.id.to_s
-    find("#merge_request_source_branch").value.should == "fix"
-    find("#merge_request_target_branch").value.should == "master"
+  step 'I see prefilled new Merge Request page' do
+    expect(page).to have_selector('.merge-request-form')
+    expect(current_path).to eq new_namespace_project_merge_request_path(@project.namespace, @project)
+    expect(find("#merge_request_target_project_id").value).to eq @project.id.to_s
+    expect(find("input#merge_request_source_branch").value).to eq "fix"
+    expect(find("input#merge_request_target_branch").value).to eq "master"
   end
 
-  Given 'user with name "John Doe" joined project "Shop"' do
-    user = create(:user, {name: "John Doe"})
-    project.team << [user, :master]
-    Event.create(
-      project: project,
-      author_id: user.id,
-      action: Event::JOINED
-    )
-  end
-
-  Then 'I should see "John Doe joined project at Shop" event' do
-    page.should have_content "John Doe joined project at #{project.name_with_namespace}"
-  end
-
-  And 'user with name "John Doe" left project "Shop"' do
-    user = User.find_by(name: "John Doe")
-    Event.create(
-      project: project,
-      author_id: user.id,
-      action: Event::LEFT
-    )
-  end
-
-  Then 'I should see "John Doe left project at Shop" event' do
-    page.should have_content "John Doe left project at #{project.name_with_namespace}"
-  end
-
-  And 'I have group with projects' do
+  step 'I have group with projects' do
     @group   = create(:group)
-    @project = create(:project, namespace: @group)
+    @project = create(:empty_project, namespace: @group)
     @event   = create(:closed_issue_event, project: @project)
 
     @project.team << [current_user, :master]
   end
 
-  Then 'I should see projects list' do
+  step 'I should see projects list' do
     @user.authorized_projects.all.each do |project|
-      page.should have_link project.name_with_namespace
+      expect(page).to have_link project.name_with_namespace
     end
   end
 
-  Then 'I should see groups list' do
+  step 'I should see groups list' do
     Group.all.each do |group|
-      page.should have_link group.name
+      expect(page).to have_link group.name
     end
   end
 
-  And 'group has a projects that does not belongs to me' do
-    @forbidden_project1 = create(:project, group: @group)
-    @forbidden_project2 = create(:project, group: @group)
+  step 'group has a projects that does not belongs to me' do
+    @forbidden_project1 = create(:empty_project, group: @group)
+    @forbidden_project2 = create(:empty_project, group: @group)
   end
 
-  Then 'I should see 1 project at group list' do
-    page.find('span.last_activity/span').should have_content('1')
+  step 'I should see 1 project at group list' do
+    expect(find('span.last_activity/span')).to have_content('1')
   end
 
-  def project
-    @project ||= Project.find_by(name: "Shop")
+  step 'I filter the list by label "feature"' do
+    page.within ".labels-filter" do
+      find('.dropdown').click
+      click_link "feature"
+    end
+  end
+
+  step 'I should see "Bugfix1" in issues list' do
+    page.within "ul.content-list" do
+      expect(page).to have_content "Bugfix1"
+    end
+  end
+
+  step 'project "Shop" has issue "Bugfix1" with label "feature"' do
+    project = Project.find_by(name: "Shop")
+    issue = create(:issue, title: "Bugfix1", project: project, assignee: current_user)
+    issue.labels << project.labels.find_by(title: 'feature')
   end
 end

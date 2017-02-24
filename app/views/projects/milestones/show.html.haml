@@ -1,108 +1,58 @@
+- @no_container = true
+- page_title       @milestone.title, "Milestones"
+- page_description @milestone.description
 = render "projects/issues/head"
-%h3.page-title
-  Milestone ##{@milestone.iid}
-  .pull-right
-    - if can?(current_user, :admin_milestone, @project)
-      = link_to edit_project_milestone_path(@project, @milestone), class: "btn btn-grouped" do
-        %i.icon-edit
-        Edit
-      - if @milestone.active?
-        = link_to 'Close Milestone', project_milestone_path(@project, @milestone, milestone: {state_event: :close }), method: :put, class: "btn btn-close btn-grouped"
-      - else
-        = link_to 'Reopen Milestone', project_milestone_path(@project, @milestone, milestone: {state_event: :activate }), method: :put, class: "btn btn-reopen btn-grouped"
 
-- if @milestone.issues.any? && @milestone.can_be_closed?
-  .alert.alert-success
-    %span All issues for this milestone are closed. You may close milestone now.
+- content_for :page_specific_javascripts do
+  = page_specific_javascript_bundle_tag('simulate_drag') if Rails.env.test?
 
-.back-link
-  = link_to project_milestones_path(@project) do
-    &larr; To milestones list
-
-
-.issue-box{ class: issue_box_class(@milestone) }
-  .state.clearfix
-    .state-label
+%div{ class: container_class }
+  .detail-page-header.milestone-page-header
+    .status-box{ class: status_box_class(@milestone) }
       - if @milestone.closed?
         Closed
       - elsif @milestone.expired?
-        Expired
+        Past due
+      - elsif @milestone.upcoming?
+        Upcoming
       - else
         Open
-    .creator
-      = @milestone.expires_at
+    .header-text-content
+      %span.identifier
+        Milestone ##{@milestone.iid}
+      - if @milestone.due_date || @milestone.start_date
+        %span.creator
+          &middot;
+        = milestone_date_range(@milestone)
+    .milestone-buttons
+      - if can?(current_user, :admin_milestone, @project)
+        - if @milestone.active?
+          = link_to 'Close Milestone', namespace_project_milestone_path(@project.namespace, @project, @milestone, milestone: {state_event: :close }), method: :put, class: "btn btn-close btn-nr btn-grouped"
+        - else
+          = link_to 'Reopen Milestone', namespace_project_milestone_path(@project.namespace, @project, @milestone, milestone: {state_event: :activate }), method: :put, class: "btn btn-reopen btn-nr btn-grouped"
 
-  %h4.title
-    = gfm escape_once(@milestone.title)
+        = link_to edit_namespace_project_milestone_path(@project.namespace, @project, @milestone), class: "btn btn-grouped btn-nr" do
+          Edit
 
-  - if @milestone.description.present?
-    .description
-      .wiki
-        = preserve do
-          = markdown @milestone.description
+        = link_to namespace_project_milestone_path(@project.namespace, @project, @milestone), data: { confirm: 'Are you sure?' }, method: :delete, class: "btn btn-grouped btn-danger" do
+          Delete
 
-  .context
-    %p
-      Progress:
-      #{@milestone.closed_items_count} closed
-      &ndash;
-      #{@milestone.open_items_count} open
-      %span.pull-right= @milestone.expires_at
-    .progress.progress-info
-      .progress-bar{style: "width: #{@milestone.percent_complete}%;"}
+  .detail-page-description.milestone-detail{ class: ('hide-bottom-border' unless @milestone.description.present? ) }
+    %h2.title
+      = markdown_field(@milestone, :title)
+    %div
+      - if @milestone.description.present?
+        .description
+          .wiki
+            = preserve do
+              = markdown_field(@milestone, :description)
 
+  - if @milestone.total_items_count(current_user).zero?
+    .alert.alert-success.prepend-top-default
+      %span Assign some issues to this milestone.
+  - elsif @milestone.complete?(current_user) && @milestone.active?
+    .alert.alert-success.prepend-top-default
+      %span All issues for this milestone are closed. You may close this milestone now.
 
-%ul.nav.nav-tabs
-  %li.active
-    = link_to '#tab-issues', 'data-toggle' => 'tab' do
-      Issues
-      %span.badge= @issues.count
-  %li
-    = link_to '#tab-merge-requests', 'data-toggle' => 'tab' do
-      Merge Requests
-      %span.badge= @merge_requests.count
-  %li
-    = link_to '#tab-participants', 'data-toggle' => 'tab' do
-      Participants
-      %span.badge= @users.count
-
-  .pull-right
-    = link_to new_project_issue_path(@project, issue: { milestone_id: @milestone.id }), class: "btn btn-small btn-grouped", title: "New Issue" do
-      %i.icon-plus
-      New Issue
-    = link_to 'Browse Issues', project_issues_path(@milestone.project, milestone_id: @milestone.id), class: "btn btn-small edit-milestone-link btn-grouped"
-
-.tab-content
-  .tab-pane.active#tab-issues
-    .row
-      .col-md-4
-        = render('issues', title: 'Unstarted Issues (open and unassigned)', issues: @issues.opened.unassigned, id: 'unassigned')
-      .col-md-4
-        = render('issues', title: 'Ongoing Issues (open and assigned)', issues: @issues.opened.assigned, id: 'ongoing')
-      .col-md-4
-        = render('issues', title: 'Completed Issues (closed)', issues: @issues.closed, id: 'closed')
-
-  .tab-pane#tab-merge-requests
-    .row
-      .col-md-3
-        = render('merge_requests', title: 'Work in progress (open and unassigned)', merge_requests: @merge_requests.opened.unassigned, id: 'unassigned')
-      .col-md-3
-        = render('merge_requests', title: 'Waiting for merge (open and assigned)', merge_requests: @merge_requests.opened.assigned, id: 'ongoing')
-      .col-md-3
-        = render('merge_requests', title: 'Declined (closed)', merge_requests: @merge_requests.declined, id: 'closed')
-      .col-md-3
-        .panel.panel-primary
-          .panel-heading Merged
-          %ul.well-list
-            - @merge_requests.merged.each do |merge_request|
-              = render 'merge_request', merge_request: merge_request
-
-  .tab-pane#tab-participants
-    %ul.bordered-list
-      - @users.each do |user|
-        %li
-          = link_to user, title: user.name, class: "darken" do
-            = image_tag avatar_icon(user.email, 32), class: "avatar s32"
-            %strong= truncate(user.name, lenght: 40)
-            %br
-            %small.cgray= user.username
+  = render 'shared/milestones/summary', milestone: @milestone, project: @project
+  = render 'shared/milestones/tabs', milestone: @milestone

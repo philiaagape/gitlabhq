@@ -1,4 +1,4 @@
-require 'gitlab/oauth/user'
+require 'gitlab/o_auth/user'
 
 # LDAP extension for User model
 #
@@ -10,103 +10,77 @@ module Gitlab
   module LDAP
     class User < Gitlab::OAuth::User
       class << self
-        def find_or_create(auth)
-          @auth = auth
-
-          if uid.blank? || email.blank? || username.blank?
-            raise_error("Account must provide a dn, uid and email address")
-          end
-
-          user = find(auth)
-
-          unless user
-            # Look for user with same emails
-            #
-            # Possible cases:
-            # * When user already has account and need to link their LDAP account.
-            # * LDAP uid changed for user with same email and we need to update their uid
-            #
-            user = find_user(email)
-
-            if user
-              user.update_attributes(extern_uid: uid, provider: provider)
-              log.info("(LDAP) Updating legacy LDAP user #{email} with extern_uid => #{uid}")
-            else
-              # Create a new user inside GitLab database
-              # based on LDAP credentials
-              #
-              #
-              user = create(auth)
-            end
-          end
-
-          user
-        end
-
-        def find_user(email)
-          user = model.find_by(email: email)
-
-          # If no user found and allow_username_or_email_login is true
-          # we look for user by extracting part of their email
-          if !user && email && ldap_conf['allow_username_or_email_login']
-            uname = email.partition('@').first
-            # Strip apostrophes since they are disallowed as part of username
-            username = uname.gsub("'", "")
-            user = model.find_by(username: username)
-          end
-
-          user
-        end
-
-        def authenticate(login, password)
-          # Check user against LDAP backend if user is not authenticated
-          # Only check with valid login and password to prevent anonymous bind results
-          return nil unless ldap_conf.enabled && login.present? && password.present?
-
-          ldap = OmniAuth::LDAP::Adaptor.new(ldap_conf)
-          filter = Net::LDAP::Filter.eq(ldap.uid, login)
-
-          # Apply LDAP user filter if present
-          if ldap_conf['user_filter'].present?
-            user_filter = Net::LDAP::Filter.construct(ldap_conf['user_filter'])
-            filter = Net::LDAP::Filter.join(filter, user_filter)
-          end
-
-          ldap_user = ldap.bind_as(
-            filter: filter,
-            size: 1,
-            password: password
-          )
-
-          find_by_uid(ldap_user.dn) if ldap_user
-        end
-
-        private
-
-        def find_by_uid_and_provider
-          find_by_uid(uid)
-        end
-
-        def find_by_uid(uid)
+        def find_by_uid_and_provider(uid, provider)
           # LDAP distinguished name is case-insensitive
-          model.where("provider = ? and lower(extern_uid) = ?", provider, uid.downcase).last
+          identity = ::Identity.
+            where(provider: provider).
+            iwhere(extern_uid: uid).last
+          identity && identity.user
+        end
+      end
+
+      def initialize(auth_hash)
+        super
+        update_user_attributes
+      end
+
+      def save
+        super('LDAP')
+      end
+
+      # instance methods
+      def gl_user
+        @gl_user ||= find_by_uid_and_provider || find_by_email || build_new_user
+      end
+
+      def find_by_uid_and_provider
+        self.class.find_by_uid_and_provider(auth_hash.uid, auth_hash.provider)
+      end
+
+      def find_by_email
+        ::User.find_by(email: auth_hash.email.downcase) if auth_hash.has_email?
+      end
+
+      def update_user_attributes
+        if persisted?
+          if auth_hash.has_email?
+            gl_user.skip_reconfirmation!
+            gl_user.email = auth_hash.email
+          end
+
+          # find_or_initialize_by doesn't update `gl_user.identities`, and isn't autosaved.
+          identity = gl_user.identities.find { |identity|  identity.provider == auth_hash.provider }
+          identity ||= gl_user.identities.build(provider: auth_hash.provider)
+
+          # For a new identity set extern_uid to the LDAP DN
+          # For an existing identity with matching email but changed DN, update the DN.
+          # For an existing identity with no change in DN, this line changes nothing.
+          identity.extern_uid = auth_hash.uid
         end
 
-        def username
-          auth.info.nickname.to_s.force_encoding("utf-8")
-        end
+        gl_user.ldap_email = auth_hash.has_email?
 
-        def provider
-          'ldap'
-        end
+        gl_user
+      end
 
-        def raise_error(message)
-          raise OmniAuth::Error, "(LDAP) " + message
-        end
+      def changed?
+        gl_user.changed? || gl_user.identities.any?(&:changed?)
+      end
 
-        def ldap_conf
-          Gitlab.config.ldap
-        end
+      def block_after_signup?
+        ldap_config.block_auto_created_users
+      end
+
+      def allowed?
+        Gitlab::LDAP::Access.allowed?(gl_user)
+      end
+
+      def ldap_config
+        Gitlab::LDAP::Config.new(auth_hash.provider)
+      end
+
+      def auth_hash=(auth_hash)
+        @auth_hash = Gitlab::LDAP::AuthHash.new(auth_hash)
       end
     end
   end

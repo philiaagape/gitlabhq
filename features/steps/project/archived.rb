@@ -1,4 +1,4 @@
-class ProjectArchived < Spinach::FeatureSteps
+class Spinach::Features::ProjectArchived < Spinach::FeatureSteps
   include SharedAuthentication
   include SharedProject
   include SharedPaths
@@ -15,15 +15,15 @@ class ProjectArchived < Spinach::FeatureSteps
 
   When 'I visit project "Forum" page' do
     project = Project.find_by(name: "Forum")
-    visit project_path(project)
+    visit namespace_project_path(project.namespace, project)
   end
 
-  Then 'I should not see "Archived"' do
-    page.should_not have_content "Archived"
+  step 'I should not see "Archived"' do
+    expect(page).not_to have_content "Archived"
   end
 
-  Then 'I should see "Archived"' do
-    page.should have_content "Archived"
+  step 'I should see "Archived"' do
+    expect(page).to have_content "Archived"
   end
 
   When 'I set project archived' do
@@ -33,5 +33,4 @@ class ProjectArchived < Spinach::FeatureSteps
   When 'I set project unarchived' do
     click_link "Unarchive"
   end
-
 end

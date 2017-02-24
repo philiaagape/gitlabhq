@@ -1,0 +1,26 @@
+.ui-widget {
+  font-family: $regular_font;
+  font-size: $font-size-base;
+
+  &.ui-autocomplete {
+    border-color: $jq-ui-border;
+    padding: 0;
+    margin-top: 2px;
+    z-index: 1001;
+
+    .ui-menu-item a {
+      padding: 4px 10px;
+    }
+  }
+
+  .ui-state-default {
+    border: 1px solid $white-light;
+    background: $white-light;
+    color: $jq-ui-default-color;
+  }
+
+  .ui-state-highlight {
+    border: 0;
+    background: transparent;
+  }
+}

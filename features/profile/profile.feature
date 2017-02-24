@@ -7,6 +7,7 @@ Feature: Profile
     Given I visit profile page
     Then I should see my profile info
 
+  @javascript
   Scenario: I can see groups I belong to
     Given I have group with projects
     When I visit profile page
@@ -35,6 +36,7 @@ Feature: Profile
     Then I change my avatar
     And I should see new avatar
     And I should see the "Remove avatar" button
+    And I should see the gravatar host link
 
   Scenario: I remove my avatar
     Given I visit profile page
@@ -42,6 +44,7 @@ Feature: Profile
     When I remove my avatar
     Then I should see my gravatar
     And I should not see the "Remove avatar" button
+    And I should see the gravatar host link
 
   Scenario: My password is expired
     Given my password is expired
@@ -56,14 +59,9 @@ Feature: Profile
     When I unsuccessfully change my password
     Then I should see a password error message
 
-  Scenario: I reset my token
-    Given I visit profile account page
-    Then I reset my token
-    And I should see new token
-
   Scenario: I visit history tab
     Given I have activity
-    When I visit profile history page
+    When I visit Audit Log page
     Then I should see my activity
 
   Scenario: I visit my user page
@@ -71,15 +69,15 @@ Feature: Profile
     And I click on my profile picture
     Then I should see my user page
 
-  @javascript
-  Scenario: I change my application theme
-    Given I visit profile design page
-    When I change my application theme
-    Then I should see the theme change immediately
-    And I should receive feedback that the changes were saved
-
-  @javascript
-  Scenario: I change my code preview theme
-    Given I visit profile design page
-    When I change my code preview theme
-    Then I should receive feedback that the changes were saved
+  Scenario: I can manage application
+    Given I visit profile applications page
+    Then I should see application form
+    Then I fill application form out and submit
+    And I see application
+    Then I click edit
+    And I see edit application form
+    Then I change name of application and submit
+    And I see that application was changed
+    Then I visit profile applications page
+    And I click to remove application
+    Then I see that application is removed

@@ -1,74 +1,199 @@
+# Check a user's access to perform a git action. All public methods in this
+# class return an instance of `GitlabAccessStatus`
 module Gitlab
   class GitAccess
+    UnauthorizedError = Class.new(StandardError)
+
+    ERROR_MESSAGES = {
+      upload: 'You are not allowed to upload code for this project.',
+      download: 'You are not allowed to download code from this project.',
+      deploy_key_upload:
+        'This deploy key does not have write access to this project.',
+      no_repo: 'A repository for this project does not exist yet.'
+    }
+
     DOWNLOAD_COMMANDS = %w{ git-upload-pack git-upload-archive }
     PUSH_COMMANDS = %w{ git-receive-pack }
+    ALL_COMMANDS = DOWNLOAD_COMMANDS + PUSH_COMMANDS
 
-    attr_reader :params, :project, :git_cmd, :user
+    attr_reader :actor, :project, :protocol, :user_access, :authentication_abilities
 
-    def allowed?(actor, cmd, project, ref = nil, oldrev = nil, newrev = nil, forced_push = false)
+    def initialize(actor, project, protocol, authentication_abilities:, env: {})
+      @actor    = actor
+      @project  = project
+      @protocol = protocol
+      @authentication_abilities = authentication_abilities
+      @user_access = UserAccess.new(user, project: project)
+      @env = env
+    end
+
+    def check(cmd, changes)
+      check_protocol!
+      check_active_user!
+      check_project_accessibility!
+      check_command_existence!(cmd)
+      check_repository_existence!
+
       case cmd
       when *DOWNLOAD_COMMANDS
-        if actor.is_a? User
-          download_allowed?(actor, project)
-        elsif actor.is_a? DeployKey
-          actor.projects.include?(project)
-        elsif actor.is_a? Key
-          download_allowed?(actor.user, project)
-        else
-          raise 'Wrong actor'
-        end
+        check_download_access!
       when *PUSH_COMMANDS
-        if actor.is_a? User
-          push_allowed?(actor, project, ref, oldrev, newrev, forced_push)
-        elsif actor.is_a? DeployKey
-          # Deploy key not allowed to push
-          return false
-        elsif actor.is_a? Key
-          push_allowed?(actor.user, project, ref, oldrev, newrev, forced_push)
-        else
-          raise 'Wrong actor'
-        end
-      else
-        false
+        check_push_access!(changes)
       end
+
+      build_status_object(true)
+    rescue UnauthorizedError => ex
+      build_status_object(false, ex.message)
     end
 
-    def download_allowed?(user, project)
-      if user && user_allowed?(user)
-        user.can?(:download_code, project)
-      else
-        false
-      end
+    def guest_can_download_code?
+      Guest.can?(:download_code, project)
     end
 
-    def push_allowed?(user, project, ref, oldrev, newrev, forced_push)
-      if user && user_allowed?(user)
-        action = if project.protected_branch?(ref)
-                   # we dont allow force push to protected branch
-                   if forced_push.to_s == 'true'
-                     :force_push_code_to_protected_branches
-                   # and we dont allow remove of protected branch
-                   elsif newrev =~ /0000000/
-                     :remove_protected_branches
-                   else
-                     :push_code_to_protected_branches
-                   end
-                 elsif project.repository && project.repository.tag_names.include?(ref)
-                   # Prevent any changes to existing git tag unless user has permissions
-                   :admin_project
-                 else
-                   :push_code
-                 end
-        user.can?(action, project)
-      else
-        false
-      end
+    def user_can_download_code?
+      authentication_abilities.include?(:download_code) && user_access.can_do_action?(:download_code)
+    end
+
+    def build_can_download_code?
+      authentication_abilities.include?(:build_download_code) && user_access.can_do_action?(:build_download_code)
+    end
+
+    def protocol_allowed?
+      Gitlab::ProtocolAccess.allowed?(protocol)
     end
 
     private
 
-    def user_allowed?(user)
-      Gitlab::UserAccess.allowed?(user)
+    def check_protocol!
+      unless protocol_allowed?
+        raise UnauthorizedError, "Git access over #{protocol.upcase} is not allowed"
+      end
+    end
+
+    def check_active_user!
+      return if deploy_key?
+
+      if user && !user_access.allowed?
+        raise UnauthorizedError, "Your account has been blocked."
+      end
+    end
+
+    def check_project_accessibility!
+      if project.blank? || !can_read_project?
+        raise UnauthorizedError, 'The project you were looking for could not be found.'
+      end
+    end
+
+    def check_command_existence!(cmd)
+      unless ALL_COMMANDS.include?(cmd)
+        raise UnauthorizedError, "The command you're trying to execute is not allowed."
+      end
+    end
+
+    def check_repository_existence!
+      unless project.repository.exists?
+        raise UnauthorizedError, ERROR_MESSAGES[:no_repo]
+      end
+    end
+
+    def check_download_access!
+      return if deploy_key?
+
+      passed = user_can_download_code? ||
+        build_can_download_code? ||
+        guest_can_download_code?
+
+      unless passed
+        raise UnauthorizedError, ERROR_MESSAGES[:download]
+      end
+    end
+
+    def check_push_access!(changes)
+      if deploy_key
+        check_deploy_key_push_access!
+      elsif user
+        check_user_push_access!
+      else
+        raise UnauthorizedError, ERROR_MESSAGES[:upload]
+      end
+
+      return if changes.blank? # Allow access.
+
+      check_change_access!(changes)
+    end
+
+    def check_user_push_access!
+      unless authentication_abilities.include?(:push_code)
+        raise UnauthorizedError, ERROR_MESSAGES[:upload]
+      end
+    end
+
+    def check_deploy_key_push_access!
+      unless deploy_key.can_push_to?(project)
+        raise UnauthorizedError, ERROR_MESSAGES[:deploy_key_upload]
+      end
+    end
+
+    def check_change_access!(changes)
+      changes_list = Gitlab::ChangesList.new(changes)
+
+      # Iterate over all changes to find if user allowed all of them to be applied
+      changes_list.each do |change|
+        status = check_single_change_access(change)
+        unless status.allowed?
+          # If user does not have access to make at least one change - cancel all push
+          raise UnauthorizedError, status.message
+        end
+      end
+    end
+
+    def check_single_change_access(change)
+      Checks::ChangeAccess.new(
+        change,
+        user_access: user_access,
+        project: project,
+        env: @env,
+        skip_authorization: deploy_key?).exec
+    end
+
+    def matching_merge_request?(newrev, branch_name)
+      Checks::MatchingMergeRequest.new(newrev, branch_name, project).match?
+    end
+
+    def deploy_key
+      actor if deploy_key?
+    end
+
+    def deploy_key?
+      actor.is_a?(DeployKey)
+    end
+
+    def can_read_project?
+      if deploy_key
+        deploy_key.has_access_to?(project)
+      elsif user
+        user.can?(:read_project, project)
+      end || Guest.can?(:read_project, project)
+    end
+
+    protected
+
+    def user
+      return @user if defined?(@user)
+
+      @user =
+        case actor
+        when User
+          actor
+        when DeployKey
+          nil
+        when Key
+          actor.user
+        end
+    end
+
+    def build_status_object(status, message = '')
+      Gitlab::GitAccessStatus.new(status, message)
     end
   end
 end

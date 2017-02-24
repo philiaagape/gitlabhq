@@ -1,14 +1,10 @@
-%h3.page-title
-  Merge Requests
+- page_title "Merge Requests"
+- header_title  "Merge Requests", merge_requests_dashboard_path(assignee_id: current_user.id)
 
+.top-area
+  = render 'shared/issuable/nav', type: :merge_requests
+  .nav-controls
+    = render 'shared/new_project_item_select', path: 'merge_requests/new', label: "New Merge Request"
 
-%p.light
-  List all merge requests from all projects you have access to.
-%hr
-.row
-  .fixed.sidebar-expand-button.hidden-lg.hidden-md
-    %i.icon-list.icon-2x
-  .col-md-3.responsive-side
-    = render 'shared/filter', entity: 'merge_request'
-  .col-md-9
-    = render 'shared/merge_requests'
+= render 'shared/issuable/filter', type: :merge_requests
+= render 'shared/merge_requests'

@@ -1,79 +1,9 @@
 # Repositories
 
-## List project repository tags
-
-Get a list of repository tags from a project, sorted by name in reverse alphabetical order.
-
-```
-GET /projects/:id/repository/tags
-```
-
-Parameters:
-
-+ `id` (required) - The ID of a project
-
-```json
-[
-  {
-    "name": "v1.0.0",
-    "commit": {
-      "id": "2695effb5807a22ff3d138d593fd856244e155e7",
-      "parents": [],
-      "tree": "38017f2f189336fe4497e9d230c5bb1bf873f08d",
-      "message": "Initial commit",
-      "author": {
-        "name": "John Smith",
-        "email": "john@example.com"
-      },
-      "committer": {
-        "name": "Jack Smith",
-        "email": "jack@example.com"
-      },
-      "authored_date": "2012-05-28T04:42:42-07:00",
-      "committed_date": "2012-05-28T04:42:42-07:00"
-    },
-    "protected": null
-  }
-]
-```
-
-## Create a new tag
-
-Creates new tag in the repository that points to the supplied ref.
-
-```
-POST /projects/:id/repository/tags
-```
-
-Parameters:
-
-+ `id` (required) - The ID of a project
-+ `tag_name` (required) - The name of a tag
-+ `ref` (required) - Create tag using commit SHA, another tag name, or branch name.
-
-```json
-[
-  {
-    "name": "v1.0.0",
-    "commit": {
-      "id": "2695effb5807a22ff3d138d593fd856244e155e7",
-      "parents": [],
-      "message": "Initial commit",
-      "authored_date": "2012-05-28T04:42:42-07:00",
-      "author_name": "John Smith",
-      "author email": "john@example.com",
-      "committer_name": "Jack Smith",
-      "committed_date": "2012-05-28T04:42:42-07:00",
-      "committer_email": "jack@example.com"
-    },
-    "protected": false
-  }
-]
-```
-
 ## List repository tree
 
-Get a list of repository files and directories in a project.
+Get a list of repository files and directories in a project. This endpoint can
+be accessed without authentication if the repository is publicly accessible.
 
 ```
 GET /projects/:id/repository/tree
@@ -81,55 +11,69 @@ GET /projects/:id/repository/tree
 
 Parameters:
 
-+ `id` (required) - The ID of a project
-+ `path` (optional) - The path inside repository. Used to get contend of subdirectories
-+ `ref_name` (optional) - The name of a repository branch or tag or if not given the default branch
+- `id` (required) - The ID of a project
+- `path` (optional) - The path inside repository. Used to get contend of subdirectories
+- `ref_name` (optional) - The name of a repository branch or tag or if not given the default branch
+- `recursive` (optional) - Boolean value used to get a recursive tree (false by default)
 
 ```json
 [
   {
-    "name": "assets",
+    "id": "a1e8f8d745cc87e3a9248358d9352bb7f9a0aeba",
+    "name": "html",
     "type": "tree",
-    "mode": "040000",
-    "id": "6229c43a7e16fcc7e95f923f8ddadb8281d9c6c6"
+    "path": "files/html",
+    "mode": "040000"
   },
   {
-    "name": "contexts",
+    "id": "4535904260b1082e14f867f7a24fd8c21495bde3",
+    "name": "images",
     "type": "tree",
-    "mode": "040000",
-    "id": "faf1cdf33feadc7973118ca42d35f1e62977e91f"
+    "path": "files/images",
+    "mode": "040000"
   },
   {
-    "name": "controllers",
+    "id": "31405c5ddef582c5a9b7a85230413ff90e2fe720",
+    "name": "js",
     "type": "tree",
-    "mode": "040000",
-    "id": "95633e8d258bf3dfba3a5268fb8440d263218d74"
+    "path": "files/js",
+    "mode": "040000"
   },
   {
-    "name": "Rakefile",
-    "type": "blob",
-    "mode": "100644",
-    "id": "35b2f05cbb4566b71b34554cf184a9d0bd9d46d6"
+    "id": "cc71111cfad871212dc99572599a568bfe1e7e00",
+    "name": "lfs",
+    "type": "tree",
+    "path": "files/lfs",
+    "mode": "040000"
   },
   {
-    "name": "VERSION",
-    "type": "blob",
-    "mode": "100644",
-    "id": "803e4a4f3727286c3093c63870c2b6524d30ec4f"
+    "id": "fd581c619bf59cfdfa9c8282377bb09c2f897520",
+    "name": "markdown",
+    "type": "tree",
+    "path": "files/markdown",
+    "mode": "040000"
   },
   {
-    "name": "config.ru",
+    "id": "23ea4d11a4bdd960ee5320c5cb65b5b3fdbc60db",
+    "name": "ruby",
+    "type": "tree",
+    "path": "files/ruby",
+    "mode": "040000"
+  },
+  {
+    "id": "7d70e02340bac451f281cecf0a980907974bd8be",
+    "name": "whitespace",
     "type": "blob",
-    "mode": "100644",
-    "id": "dfd2d862237323aa599be31b473d70a8a817943b"
+    "path": "files/whitespace",
+    "mode": "100644"
   }
 ]
 ```
 
-
 ## Raw file content
 
-Get the raw file contents for a file by commit SHA and path.
+Get the raw file contents for a file by commit SHA and path. This endpoint can
+be accessed without authentication if the repository is publicly accessible.
 
 ```
 GET /projects/:id/repository/blobs/:sha
@@ -137,14 +81,14 @@ GET /projects/:id/repository/blobs/:sha
 
 Parameters:
 
-+ `id` (required) - The ID of a project
-+ `sha` (required) - The commit or branch name
-+ `filepath` (required) - The path the file
-
+- `id` (required) - The ID of a project
+- `sha` (required) - The commit or branch name
+- `filepath` (required) - The path the file
 
 ## Raw blob content
 
-Get the raw file contents for a blob by blob SHA.
+Get the raw file contents for a blob by blob SHA. This endpoint can be accessed
+without authentication if the repository is publicly accessible.
 
 ```
 GET /projects/:id/repository/raw_blobs/:sha
@@ -152,34 +96,37 @@ GET /projects/:id/repository/raw_blobs/:sha
 
 Parameters:
 
-+ `id` (required) - The ID of a project
-+ `sha` (required) - The blob SHA
-
+- `id` (required) - The ID of a project
+- `sha` (required) - The blob SHA
 
 ## Get file archive
 
-Get a an archive of the repository
+Get an archive of the repository. This endpoint can be accessed without
+authentication if the repository is publicly accessible.
 
 ```
 GET /projects/:id/repository/archive
 ```
 
 Parameters:
-+ `id` (required) - The ID of a project
-+ `sha` (optional) - The commit SHA to download defaults to the tip of the default branch
 
+- `id` (required) - The ID of a project
+- `sha` (optional) - The commit SHA to download defaults to the tip of the default branch
 
 ## Compare branches, tags or commits
+
+This endpoint can be accessed without authentication if the repository is
+publicly accessible.
 
 ```
 GET /projects/:id/repository/compare
 ```
 
 Parameters:
-+ `id` (required) - The ID of a project
-+ `from` (required) - the commit SHA or branch name
-+ `to` (required) - the commit SHA or branch name
 
+- `id` (required) - The ID of a project
+- `from` (required) - the commit SHA or branch name
+- `to` (required) - the commit SHA or branch name
 
 ```
 GET /projects/:id/repository/compare?from=master&to=feature
@@ -223,14 +170,16 @@ Response:
 
 ## Contributors
 
-Get repository contributors list
+Get repository contributors list. This endpoint can be accessed without
+authentication if the repository is publicly accessible.
 
 ```
 GET /projects/:id/repository/contributors
 ```
 
 Parameters:
-+ `id` (required) - The ID of a project
+
+- `id` (required) - The ID of a project
 
 Response:
 

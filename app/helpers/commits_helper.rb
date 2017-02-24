@@ -1,4 +1,3 @@
-# encoding: utf-8
 module CommitsHelper
   # Returns a link to the commit author. If the author has a matching user and
   # is a member of the current @project it will link to the team member page.
@@ -16,38 +15,6 @@ module CommitsHelper
     commit_person_link(commit, options.merge(source: :committer))
   end
 
-  def each_diff_line(diff, index)
-    Gitlab::DiffParser.new(diff.diff.lines.to_a, diff.new_path)
-      .each do |full_line, type, line_code, line_new, line_old|
-        yield(full_line, type, line_code, line_new, line_old)
-      end
-  end
-
-  def each_diff_line_near(diff, index, expected_line_code)
-    max_number_of_lines = 16
-
-    prev_match_line = nil
-    prev_lines = []
-
-    each_diff_line(diff, index) do |full_line, type, line_code, line_new, line_old|
-      line = [full_line, type, line_code, line_new, line_old]
-      if line_code != expected_line_code
-        if type == "match"
-          prev_lines.clear
-          prev_match_line = line
-        else
-          prev_lines.push(line)
-          prev_lines.shift if prev_lines.length >= max_number_of_lines
-        end
-      else
-        yield(prev_match_line) if !prev_match_line.nil?
-        prev_lines.each { |ln| yield(ln) }
-        yield(line)
-        break
-      end
-    end
-  end
-
   def image_diff_class(diff)
     if diff.deleted_file
       "deleted"
@@ -58,17 +25,11 @@ module CommitsHelper
     end
   end
 
-  def commit_to_html(commit, project, inline = true)
-    template = inline ? "inline_commit" : "commit"
-    escape_javascript(render "projects/commits/#{template}", commit: commit, project: project) unless commit.nil?
-  end
-
-  def diff_line_content(line)
-    if line.blank?
-      " &nbsp;"
-    else
-      line
-    end
+  def commit_to_html(commit, ref, project)
+    render 'projects/commits/commit',
+      commit: commit,
+      ref: ref,
+      project: project
   end
 
   # Breadcrumb links for a Project and, if applicable, a tree path
@@ -77,16 +38,26 @@ module CommitsHelper
 
     # Add the root project link and the arrow icon
     crumbs = content_tag(:li) do
-      link_to(@project.path, project_commits_path(@project, @ref))
+      link_to(
+        @project.path,
+        namespace_project_commits_path(@project.namespace, @project, @ref)
+      )
     end
 
     if @path
       parts = @path.split('/')
 
       parts.each_with_index do |part, i|
-        crumbs += content_tag(:li) do
+        crumbs << content_tag(:li) do
           # The text is just the individual part, but the link needs all the parts before it
-          link_to part, project_commits_path(@project, tree_join(@ref, parts[0..i].join('/')))
+          link_to(
+            part,
+            namespace_project_commits_path(
+              @project.namespace,
+              @project,
+              tree_join(@ref, parts[0..i].join('/'))
+            )
+          )
         end
       end
     end
@@ -102,94 +73,66 @@ module CommitsHelper
 
   # Returns the sorted alphabetically links to branches, separated by a comma
   def commit_branches_links(project, branches)
-    branches.sort.map { |branch| link_to(branch, project_tree_path(project, branch)) }.join(", ").html_safe
+    branches.sort.map do |branch|
+      link_to(
+        namespace_project_tree_path(project.namespace, project, branch)
+      ) do
+        content_tag :span, class: 'label label-gray' do
+          icon('code-fork') + ' ' + branch
+        end
+      end
+    end.join(" ").html_safe
   end
 
-  def parallel_diff_lines(project, commit, diff, file)
-    old_file = project.repository.blob_at(commit.parent_id, diff.old_path) if commit.parent_id
-    deleted_lines = {}
-    added_lines = {}
-    each_diff_line(diff, 0) do |line, type, line_code, line_new, line_old|
-      if type == "old"
-        deleted_lines[line_old] = { line_code: line_code, type: type, line: line }
-      elsif type == "new"
-        added_lines[line_new]   = { line_code: line_code, type: type, line: line }
+  # Returns the sorted links to tags, separated by a comma
+  def commit_tags_links(project, tags)
+    sorted = VersionSorter.rsort(tags)
+    sorted.map do |tag|
+      link_to(
+        namespace_project_commits_path(project.namespace, project,
+                                       project.repository.find_tag(tag).name)
+      ) do
+        content_tag :span, class: 'label label-gray' do
+          icon('tag') + ' ' + tag
+        end
       end
-    end
-    max_length = old_file ? [old_file.loc, file.loc].max : file.loc
-
-    offset1 = 0
-    offset2 = 0
-    old_lines = []
-    new_lines = []
-
-    max_length.times do |line_index|
-      line_index1 = line_index - offset1
-      line_index2 = line_index - offset2
-      deleted_line = deleted_lines[line_index1 + 1]
-      added_line = added_lines[line_index2 + 1]
-      old_line = old_file.lines[line_index1] if old_file
-      new_line = file.lines[line_index2]
-
-      if deleted_line && added_line
-      elsif deleted_line
-        new_line = nil
-        offset2 += 1
-      elsif added_line
-        old_line = nil
-        offset1 += 1
-      end
-
-      old_lines[line_index] = DiffLine.new
-      new_lines[line_index] = DiffLine.new
-
-      # old
-      if line_index == 0 && diff.new_file
-        old_lines[line_index].type = :file_created
-        old_lines[line_index].content = 'File was created'
-      elsif deleted_line
-        old_lines[line_index].type = :deleted
-        old_lines[line_index].content = old_line
-        old_lines[line_index].num = line_index1 + 1
-        old_lines[line_index].code = deleted_line[:line_code]
-      elsif old_line
-        old_lines[line_index].type = :no_change
-        old_lines[line_index].content = old_line
-        old_lines[line_index].num = line_index1 + 1
-      else
-        old_lines[line_index].type = :added
-      end
-
-      # new
-      if line_index == 0 && diff.deleted_file
-        new_lines[line_index].type = :file_deleted
-        new_lines[line_index].content = "File was deleted"
-      elsif added_line
-        new_lines[line_index].type = :added
-        new_lines[line_index].num = line_index2 + 1
-        new_lines[line_index].content = new_line
-        new_lines[line_index].code = added_line[:line_code]
-      elsif new_line
-        new_lines[line_index].type = :no_change
-        new_lines[line_index].num = line_index2 + 1
-        new_lines[line_index].content = new_line
-      else
-        new_lines[line_index].type = :deleted
-      end
-    end
-
-    return old_lines, new_lines
+    end.join(" ").html_safe
   end
 
   def link_to_browse_code(project, commit)
-    if current_controller?(:projects, :commits)
-      if @repo.blob_at(commit.id, @path)
-        return link_to "Browse File »", project_blob_path(project, tree_join(commit.id, @path)), class: "pull-right"
-      elsif @path.present?
-        return link_to "Browse Dir »", project_tree_path(project, tree_join(commit.id, @path)), class: "pull-right"
-      end
+    if @path.blank?
+      return link_to(
+        "Browse Files",
+        namespace_project_tree_path(project.namespace, project, commit),
+        class: "btn btn-default"
+      )
     end
-    link_to "Browse Code »", project_tree_path(project, commit), class: "pull-right"
+
+    return unless current_controller?(:projects, :commits)
+
+    if @repo.blob_at(commit.id, @path)
+      return link_to(
+        "Browse File",
+        namespace_project_blob_path(project.namespace, project,
+                                    tree_join(commit.id, @path)),
+        class: "btn btn-default"
+      )
+    elsif @path.present?
+      return link_to(
+        "Browse Directory",
+        namespace_project_tree_path(project.namespace, project,
+                                    tree_join(commit.id, @path)),
+        class: "btn btn-default"
+      )
+    end
+  end
+
+  def revert_commit_link(commit, continue_to_path, btn_class: nil, has_tooltip: true)
+    commit_action_link('revert', commit, continue_to_path, btn_class: btn_class, has_tooltip: has_tooltip)
+  end
+
+  def cherry_pick_commit_link(commit, continue_to_path, btn_class: nil, has_tooltip: true)
+    commit_action_link('cherry-pick', commit, continue_to_path, btn_class: btn_class, has_tooltip: has_tooltip)
   end
 
   protected
@@ -203,23 +146,23 @@ module CommitsHelper
   #  avatar: true will prepend the avatar image
   #  size:   size of the avatar image in px
   def commit_person_link(commit, options = {})
-    source_name = commit.send "#{options[:source]}_name".to_sym
-    source_email = commit.send "#{options[:source]}_email".to_sym
+    user = commit.send(options[:source])
 
-    user = User.find_for_commit(source_email, source_name)
-    person_name = user.nil? ? source_name : user.name
-    person_email = user.nil? ? source_email : user.email
+    source_name = clean(commit.send "#{options[:source]}_name".to_sym)
+    source_email = clean(commit.send "#{options[:source]}_email".to_sym)
 
-    text = if options[:avatar]
-            avatar = image_tag(avatar_icon(person_email, options[:size]), class: "avatar #{"s#{options[:size]}" if options[:size]}", width: options[:size], alt: "")
-            %Q{#{avatar} <span class="commit-#{options[:source]}-name">#{person_name}</span>}
-          else
-            person_name
-          end
+    person_name = user.try(:name) || source_name
+
+    text =
+      if options[:avatar]
+        %Q{<span class="commit-#{options[:source]}-name">#{person_name}</span>}
+      else
+        person_name
+      end
 
     options = {
-      class: "commit-#{options[:source]}-link has_tooltip",
-      data: { :'original-title' => sanitize(source_email) }
+      class: "commit-#{options[:source]}-link has-tooltip",
+      title: source_email
     }
 
     if user.nil?
@@ -229,7 +172,66 @@ module CommitsHelper
     end
   end
 
-  def diff_file_mode_changed?(diff)
-    diff.a_mode && diff.b_mode && diff.a_mode != diff.b_mode
+  def commit_action_link(action, commit, continue_to_path, btn_class: nil, has_tooltip: true)
+    return unless current_user
+
+    tooltip = "#{action.capitalize} this #{commit.change_type_title(current_user)} in a new merge request" if has_tooltip
+    btn_class = "btn btn-#{btn_class}" unless btn_class.nil?
+
+    if can_collaborate_with_project?
+      link_to action.capitalize, "#modal-#{action}-commit", 'data-toggle' => 'modal', 'data-container' => 'body', title: (tooltip if has_tooltip), class: "#{btn_class} #{'has-tooltip' if has_tooltip}"
+    elsif can?(current_user, :fork_project, @project)
+      continue_params = {
+        to: continue_to_path,
+        notice: "#{edit_in_new_fork_notice} Try to #{action} this commit again.",
+        notice_now: edit_in_new_fork_notice_now
+      }
+      fork_path = namespace_project_forks_path(@project.namespace, @project,
+        namespace_key: current_user.namespace.id,
+        continue: continue_params)
+
+      link_to action.capitalize, fork_path, class: btn_class, method: :post, 'data-toggle' => 'tooltip', 'data-container' => 'body', title: (tooltip if has_tooltip)
+    end
+  end
+
+  def view_file_button(commit_sha, diff_new_path, project)
+    link_to(
+      namespace_project_blob_path(project.namespace, project,
+                                  tree_join(commit_sha, diff_new_path)),
+      class: 'btn view-file js-view-file'
+    ) do
+      raw('View file @') + content_tag(:span, commit_sha[0..6],
+                                       class: 'commit-short-id')
+    end
+  end
+
+  def view_on_environment_button(commit_sha, diff_new_path, environment)
+    return unless environment && commit_sha
+
+    external_url = environment.external_url_for(diff_new_path, commit_sha)
+    return unless external_url
+
+    link_to(external_url, class: 'btn btn-file-option has-tooltip', target: '_blank', title: "View on #{environment.formatted_external_url}", data: { container: 'body' }) do
+      icon('external-link')
+    end
+  end
+
+  def truncate_sha(sha)
+    Commit.truncate_sha(sha)
+  end
+
+  def clean(string)
+    Sanitize.clean(string, remove_contents: true)
+  end
+
+  def limited_commits(commits)
+    if commits.size > MergeRequestDiff::COMMITS_SAFE_SIZE
+      [
+        commits.first(MergeRequestDiff::COMMITS_SAFE_SIZE),
+        commits.size - MergeRequestDiff::COMMITS_SAFE_SIZE
+      ]
+    else
+      [commits, 0]
+    end
   end
 end

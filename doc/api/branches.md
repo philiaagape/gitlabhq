@@ -8,39 +8,43 @@ Get a list of repository branches from a project, sorted by name alphabetically.
 GET /projects/:id/repository/branches
 ```
 
-Parameters:
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id` | integer | yes | The ID of a project |
 
-- `id` (required) - The ID of a project
+```bash
+curl --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" https://gitlab.example.com/api/v3/projects/5/repository/branches
+```
+
+Example response:
 
 ```json
 [
   {
     "name": "master",
+    "merged": false,
+    "protected": true,
+    "developers_can_push": false,
+    "developers_can_merge": false,
     "commit": {
-      "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
-      "parents": [
-        {
-          "id": "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
-        }
-      ],
-      "tree": "46e82de44b1061621357f24c05515327f2795a95",
-      "message": "add projects API",
-      "author": {
-        "name": "John Smith",
-        "email": "john@example.com"
-      },
-      "committer": {
-        "name": "John Smith",
-        "email": "john@example.com"
-      },
+      "author_email": "john@example.com",
+      "author_name": "John Smith",
       "authored_date": "2012-06-27T05:51:39-07:00",
-      "committed_date": "2012-06-28T03:44:20-07:00"
-    },
-    "protected": true
-  }
+      "committed_date": "2012-06-28T03:44:20-07:00",
+      "committer_email": "john@example.com",
+      "committer_name": "John Smith",
+      "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
+      "short_id": "7b5c3cc",
+      "title": "add projects API",
+      "message": "add projects API",
+      "parent_ids": [
+        "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
+      ]
+    }
+  },
+  ...
 ]
 ```
-
 
 ## Get single repository branch
 
@@ -50,117 +54,133 @@ Get a single project repository branch.
 GET /projects/:id/repository/branches/:branch
 ```
 
-Parameters:
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id` | integer | yes | The ID of a project |
+| `branch` | string | yes | The name of the branch |
 
-- `id` (required) - The ID of a project
-- `branch` (required) - The name of the branch
+```bash
+curl --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" https://gitlab.example.com/api/v3/projects/5/repository/branches/master
+```
+
+Example response:
 
 ```json
 {
   "name": "master",
+  "merged": false,
+  "protected": true,
+  "developers_can_push": false,
+  "developers_can_merge": false,
   "commit": {
-    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
-    "parents": [
-      {
-        "id": "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
-      }
-    ],
-    "tree": "46e82de44b1061621357f24c05515327f2795a95",
-    "message": "add projects API",
-    "author": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
-    "committer": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
+    "author_email": "john@example.com",
+    "author_name": "John Smith",
     "authored_date": "2012-06-27T05:51:39-07:00",
-    "committed_date": "2012-06-28T03:44:20-07:00"
-  },
-  "protected": true
+    "committed_date": "2012-06-28T03:44:20-07:00",
+    "committer_email": "john@example.com",
+    "committer_name": "John Smith",
+    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
+    "short_id": "7b5c3cc",
+    "title": "add projects API",
+    "message": "add projects API",
+    "parent_ids": [
+      "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
+    ]
+  }
 }
 ```
 
 ## Protect repository branch
 
-Protects a single project repository branch. This is an idempotent function, protecting an already
-protected repository branch still returns a `200 Ok` status code.
+Protects a single project repository branch. This is an idempotent function,
+protecting an already protected repository branch still returns a `200 OK`
+status code.
 
 ```
 PUT /projects/:id/repository/branches/:branch/protect
 ```
 
-Parameters:
+```bash
+curl --request PUT --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" https://gitlab.example.com/api/v3/projects/5/repository/branches/master/protect?developers_can_push=true&developers_can_merge=true
+```
 
-- `id` (required) - The ID of a project
-- `branch` (required) - The name of the branch
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id` | integer | yes | The ID of a project |
+| `branch` | string | yes | The name of the branch |
+| `developers_can_push` | boolean | no | Flag if developers can push to the branch |
+| `developers_can_merge` | boolean | no | Flag if developers can merge to the branch |
+
+Example response:
 
 ```json
 {
-  "name": "master",
   "commit": {
-    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
-    "parents": [
-      {
-        "id": "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
-      }
-    ],
-    "tree": "46e82de44b1061621357f24c05515327f2795a95",
-    "message": "add projects API",
-    "author": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
-    "committer": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
+    "author_email": "john@example.com",
+    "author_name": "John Smith",
     "authored_date": "2012-06-27T05:51:39-07:00",
-    "committed_date": "2012-06-28T03:44:20-07:00"
+    "committed_date": "2012-06-28T03:44:20-07:00",
+    "committer_email": "john@example.com",
+    "committer_name": "John Smith",
+    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
+    "short_id": "7b5c3cc",
+    "title": "add projects API",
+    "message": "add projects API",
+    "parent_ids": [
+      "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
+    ]
   },
-  "protected": true
+  "name": "master",
+  "merged": false,
+  "protected": true,
+  "developers_can_push": true,
+  "developers_can_merge": true
 }
 ```
 
 ## Unprotect repository branch
 
-Unprotects a single project repository branch. This is an idempotent function, unprotecting an already
-unprotected repository branch still returns a `200 Ok` status code.
+Unprotects a single project repository branch. This is an idempotent function,
+unprotecting an already unprotected repository branch still returns a `200 OK`
+status code.
 
 ```
 PUT /projects/:id/repository/branches/:branch/unprotect
 ```
 
-Parameters:
+```bash
+curl --request PUT --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" https://gitlab.example.com/api/v3/projects/5/repository/branches/master/unprotect
+```
 
-- `id` (required) - The ID of a project
-- `branch` (required) - The name of the branch
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id` | integer | yes | The ID of a project |
+| `branch` | string | yes | The name of the branch |
+
+Example response:
 
 ```json
 {
-  "name": "master",
   "commit": {
-    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
-    "parents": [
-      {
-        "id": "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
-      }
-    ],
-    "tree": "46e82de44b1061621357f24c05515327f2795a95",
-    "message": "add projects API",
-    "author": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
-    "committer": {
-      "name": "John Smith",
-      "email": "john@example.com"
-    },
+    "author_email": "john@example.com",
+    "author_name": "John Smith",
     "authored_date": "2012-06-27T05:51:39-07:00",
-    "committed_date": "2012-06-28T03:44:20-07:00"
+    "committed_date": "2012-06-28T03:44:20-07:00",
+    "committer_email": "john@example.com",
+    "committer_name": "John Smith",
+    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
+    "short_id": "7b5c3cc",
+    "title": "add projects API",
+    "message": "add projects API",
+    "parent_ids": [
+      "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
+    ]
   },
-  "protected": false
+  "name": "master",
+  "merged": false,
+  "protected": false,
+  "developers_can_push": false,
+  "developers_can_merge": false
 }
 ```
 
@@ -170,43 +190,81 @@ Parameters:
 POST /projects/:id/repository/branches
 ```
 
-Parameters:
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id`          | integer | yes | The ID of a project |
+| `branch_name` | string  | yes | The name of the branch |
+| `ref`         | string  | yes | The branch name or commit SHA to create branch from |
 
-- `id` (required) - The ID of a project
-- `branch_name` (required) - The name of the branch
-- `ref` (required) - Create branch from commit SHA or existing branch
+```bash
+curl --request POST --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" "https://gitlab.example.com/api/v3/projects/5/repository/branches?branch_name=newbranch&ref=master"
+```
+
+Example response:
 
 ```json
 {
-  "name": "my-new-branch",
   "commit": {
-    "id": "8848c0e90327a0b70f1865b843fb2fbfb9345e57",
-    "message": "Merge pull request #54 from brightbox/use_fog_brightbox_module\n\nUpdate to use fog-brightbox module",
-    "parent_ids": [
-      "fff449e0bf453576f16c91d6544f00a2664009d8",
-      "f93a93626fec20fd659f4ed3ab2e64019b6169ae"
-    ],
-    "authored_date": "2014-02-20T19:54:55+02:00",
-    "author_name": "john smith",
     "author_email": "john@example.com",
-    "committed_date": "2014-02-20T19:54:55+02:00",
-    "committer_name": "john smith",
-    "committer_email": "john@example.com"
+    "author_name": "John Smith",
+    "authored_date": "2012-06-27T05:51:39-07:00",
+    "committed_date": "2012-06-28T03:44:20-07:00",
+    "committer_email": "john@example.com",
+    "committer_name": "John Smith",
+    "id": "7b5c3cc8be40ee161ae89a06bba6229da1032a0c",
+    "short_id": "7b5c3cc",
+    "title": "add projects API",
+    "message": "add projects API",
+    "parent_ids": [
+      "4ad91d3c1144c406e50c7b33bae684bd6837faf8"
+    ]
   },
-  "protected": false
+  "name": "newbranch",
+  "merged": false,
+  "protected": false,
+  "developers_can_push": false,
+  "developers_can_merge": false
 }
 ```
 
 ## Delete repository branch
 
-
 ```
 DELETE /projects/:id/repository/branches/:branch
 ```
 
-Parameters:
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id`      | integer | yes | The ID of a project |
+| `branch`  | string  | yes | The name of the branch |
 
-+ `id` (required) - The ID of a project
-+ `branch` (required) - The name of the branch
+In case of an error, an explaining message is provided.
 
-It return 200 if succeed or 405 if failed with error message explaining reason.
+```bash
+curl --request DELETE --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" "https://gitlab.example.com/api/v3/projects/5/repository/branches/newbranch"
+```
+
+Example response:
+
+```json
+{
+  "branch_name": "newbranch"
+}
+```
+
+## Delete merged branches
+
+Will delete all branches that are merged into the project's default branch.
+
+```
+DELETE /projects/:id/repository/merged_branches
+```
+
+| Attribute | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `id`      | integer | yes | The ID of a project |
+
+
+```bash
+curl --request DELETE --header "PRIVATE-TOKEN: 9koXpg98eAheJpvBs5tK" "https://gitlab.example.com/api/v3/projects/5/repository/merged_branches"
+```

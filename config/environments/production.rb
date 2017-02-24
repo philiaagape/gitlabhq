@@ -1,4 +1,4 @@
-Gitlab::Application.configure do
+Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb
 
   # Code is not reloaded between requests
@@ -9,16 +9,20 @@ Gitlab::Application.configure do
   config.action_controller.perform_caching = true
 
   # Disable Rails's static asset server (Apache or nginx will already do this)
-  config.serve_static_assets = false
+  config.serve_static_files = false
 
-  # Compress JavaScripts and CSS
-  config.assets.compress = true
+  # Compress JavaScripts and CSS.
+  config.assets.js_compressor = :uglifier
+  # config.assets.css_compressor = :sass
 
   # Don't fallback to assets pipeline if a precompiled asset is missed
   config.assets.compile = true
 
   # Generate digests for assets URLs
   config.assets.digest = true
+
+  # Enable compression of compiled assets using gzip.
+  config.assets.compress = true
 
   # Defaults to nil and saved in location specified by config.assets.prefix
   # config.assets.manifest = YOUR_PATH
@@ -31,7 +35,7 @@ Gitlab::Application.configure do
   # config.force_ssl = true
 
   # See everything in the log (default is :info)
-  # config.log_level = :debug
+  config.log_level = :info
 
   # Suppress 'Rendered template ...' messages in the log
   # source: http://stackoverflow.com/a/16369363
@@ -44,16 +48,6 @@ Gitlab::Application.configure do
 
   # Use a different logger for distributed setups
   # config.logger = ActiveSupport::TaggedLogging.new(SyslogLogger.new)
-
-  # Use a different cache store in production
-  config_file = Rails.root.join('config', 'resque.yml')
-
-  resque_url = if File.exists?(config_file)
-                 YAML.load_file(config_file)[Rails.env]
-               else
-                 "redis://localhost:6379"
-               end
-  config.cache_store = :redis_store, resque_url, {namespace: 'cache:gitlab'}
 
   # Enable serving of images, stylesheets, and JavaScripts from an asset server
   # config.action_controller.asset_host = "http://assets.example.com"
@@ -84,7 +78,6 @@ Gitlab::Application.configure do
   config.action_mailer.raise_delivery_errors = true
 
   config.eager_load = true
-  config.assets.js_compressor = :uglifier
 
   config.allow_concurrency = false
 end

@@ -4,11 +4,11 @@ module SharedAuthentication
   include Spinach::DSL
   include LoginHelpers
 
-  Given 'I sign in as a user' do
+  step 'I sign in as a user' do
     login_as :user
   end
 
-  Given 'I sign in as an admin' do
+  step 'I sign in as an admin' do
     login_as :admin
   end
 
@@ -21,14 +21,18 @@ module SharedAuthentication
   end
 
   step 'I should be redirected to sign in page' do
-    current_path.should == new_user_session_path
+    expect(current_path).to eq new_user_session_path
   end
 
   step "I logout" do
     logout
   end
 
+  step "I logout directly" do
+    logout_direct
+  end
+
   def current_user
-    @user || User.first
+    @user || User.reorder(nil).first
   end
 end

@@ -1,363 +1,390 @@
-# == Schema Information
-#
-# Table name: notes
-#
-#  id            :integer          not null, primary key
-#  note          :text
-#  noteable_type :string(255)
-#  author_id     :integer
-#  created_at    :datetime
-#  updated_at    :datetime
-#  project_id    :integer
-#  attachment    :string(255)
-#  line_code     :string(255)
-#  commit_id     :string(255)
-#  noteable_id   :integer
-#  system        :boolean          default(FALSE), not null
-#  st_diff       :text
-#
-
 require 'spec_helper'
 
-describe Note do
-  describe "Associations" do
-    it { should belong_to(:project) }
-    it { should belong_to(:noteable) }
-    it { should belong_to(:author).class_name('User') }
+describe Note, models: true do
+  include RepoHelpers
+
+  describe 'associations' do
+    it { is_expected.to belong_to(:project) }
+    it { is_expected.to belong_to(:noteable).touch(true) }
+    it { is_expected.to belong_to(:author).class_name('User') }
+
+    it { is_expected.to have_many(:todos).dependent(:destroy) }
   end
 
-  describe "Mass assignment" do
+  describe 'modules' do
+    subject { described_class }
+
+    it { is_expected.to include_module(Participable) }
+    it { is_expected.to include_module(Mentionable) }
+    it { is_expected.to include_module(Awardable) }
+
+    it { is_expected.to include_module(Gitlab::CurrentSettings) }
   end
 
-  describe "Validation" do
-    it { should validate_presence_of(:note) }
-    it { should validate_presence_of(:project) }
-  end
+  describe 'validation' do
+    it { is_expected.to validate_presence_of(:note) }
+    it { is_expected.to validate_presence_of(:project) }
 
-  describe "Voting score" do
-    let(:project) { create(:project) }
+    context 'when note is on commit' do
+      before { allow(subject).to receive(:for_commit?).and_return(true) }
 
-    it "recognizes a neutral note" do
-      note = create(:votable_note, note: "This is not a +1 note")
-      note.should_not be_upvote
-      note.should_not be_downvote
+      it { is_expected.to validate_presence_of(:commit_id) }
+      it { is_expected.not_to validate_presence_of(:noteable_id) }
     end
 
-    it "recognizes a neutral emoji note" do
-      note = build(:votable_note, note: "I would :+1: this, but I don't want to")
-      note.should_not be_upvote
-      note.should_not be_downvote
+    context 'when note is not on commit' do
+      before { allow(subject).to receive(:for_commit?).and_return(false) }
+
+      it { is_expected.not_to validate_presence_of(:commit_id) }
+      it { is_expected.to validate_presence_of(:noteable_id) }
     end
 
-    it "recognizes a +1 note" do
-      note = create(:votable_note, note: "+1 for this")
-      note.should be_upvote
+    context 'when noteable and note project differ' do
+      subject do
+        build(:note, noteable: build_stubbed(:issue),
+                     project: build_stubbed(:empty_project))
+      end
+
+      it { is_expected.to be_invalid }
     end
 
-    it "recognizes a +1 emoji as a vote" do
-      note = build(:votable_note, note: ":+1: for this")
-      note.should be_upvote
+    context 'when noteable and note project are the same' do
+      subject { create(:note) }
+      it { is_expected.to be_valid }
     end
 
-    it "recognizes a thumbsup emoji as a vote" do
-      note = build(:votable_note, note: ":thumbsup: for this")
-      note.should be_upvote
+    context 'when project is missing for a project related note' do
+      subject { build(:note, project: nil, noteable: build_stubbed(:issue)) }
+      it { is_expected.to be_invalid }
     end
 
-    it "recognizes a -1 note" do
-      note = create(:votable_note, note: "-1 for this")
-      note.should be_downvote
-    end
+    context 'when noteable is a personal snippet' do
+      subject { build(:note_on_personal_snippet) }
 
-    it "recognizes a -1 emoji as a vote" do
-      note = build(:votable_note, note: ":-1: for this")
-      note.should be_downvote
-    end
-
-    it "recognizes a thumbsdown emoji as a vote" do
-      note = build(:votable_note, note: ":thumbsdown: for this")
-      note.should be_downvote
+      it 'is valid without project' do
+        is_expected.to be_valid
+      end
     end
   end
-
-  let(:project) { create(:project) }
 
   describe "Commit notes" do
     let!(:note) { create(:note_on_commit, note: "+1 from me") }
     let!(:commit) { note.noteable }
 
-    it "should be accessible through #noteable" do
-      note.commit_id.should == commit.id
-      note.noteable.should be_a(Commit)
-      note.noteable.should == commit
+    it "is accessible through #noteable" do
+      expect(note.commit_id).to eq(commit.id)
+      expect(note.noteable).to be_a(Commit)
+      expect(note.noteable).to eq(commit)
     end
 
-    it "should save a valid note" do
-      note.commit_id.should == commit.id
+    it "saves a valid note" do
+      expect(note.commit_id).to eq(commit.id)
       note.noteable == commit
     end
 
-    it "should be recognized by #for_commit?" do
-      note.should be_for_commit
+    it "is recognized by #for_commit?" do
+      expect(note).to be_for_commit
     end
 
-    it "should not be votable" do
-      note.should_not be_votable
-    end
-  end
-
-  describe "Commit diff line notes" do
-    let!(:note) { create(:note_on_commit_diff, note: "+1 from me") }
-    let!(:commit) { note.noteable }
-
-    it "should save a valid note" do
-      note.commit_id.should == commit.id
-      note.noteable.id.should == commit.id
-    end
-
-    it "should be recognized by #for_diff_line?" do
-      note.should be_for_diff_line
-    end
-
-    it "should be recognized by #for_commit_diff_line?" do
-      note.should be_for_commit_diff_line
-    end
-
-    it "should not be votable" do
-      note.should_not be_votable
+    it "keeps the commit around" do
+      expect(note.project.repository.kept_around?(commit.id)).to be_truthy
     end
   end
 
-  describe "Issue notes" do
-    let!(:note) { create(:note_on_issue, note: "+1 from me") }
-
-    it "should not be votable" do
-      note.should be_votable
-    end
-  end
-
-  describe "Merge request notes" do
-    let!(:note) { create(:note_on_merge_request, note: "+1 from me") }
-
-    it "should be votable" do
-      note.should be_votable
-    end
-  end
-
-  describe "Merge request diff line notes" do
-    let!(:note) { create(:note_on_merge_request_diff, note: "+1 from me") }
-
-    it "should not be votable" do
-      note.should_not be_votable
-    end
-  end
-
-  describe '#create_status_change_note' do
-    let(:project) { create(:project) }
-    let(:thing) { create(:issue, project: project) }
-    let(:author) { create(:user) }
-    let(:status) { 'new_status' }
-
-    subject { Note.create_status_change_note(thing, project, author, status, nil) }
-
-    it 'creates and saves a Note' do
-      should be_a Note
-      subject.id.should_not be_nil
-    end
-
-    its(:noteable) { should == thing }
-    its(:project) { should == thing.project }
-    its(:author) { should == author }
-    its(:note) { should =~ /Status changed to #{status}/ }
-
-    it 'appends a back-reference if a closing mentionable is supplied' do
-      commit = double('commit', gfm_reference: 'commit 123456')
-      n = Note.create_status_change_note(thing, project, author, status, commit)
-
-      n.note.should =~ /Status changed to #{status} by commit 123456/
-    end
-  end
-
-  describe '#create_assignee_change_note' do
-    let(:project) { create(:project) }
-    let(:thing) { create(:issue, project: project) }
-    let(:author) { create(:user) }
-    let(:assignee) { create(:user) }
-
-    subject { Note.create_assignee_change_note(thing, project, author, assignee) }
-
-    context 'creates and saves a Note' do
-      it { should be_a Note }
-      its(:id) { should_not be_nil }
-    end
-
-    its(:noteable) { should == thing }
-    its(:project) { should == thing.project }
-    its(:author) { should == author }
-    its(:note) { should =~ /Reassigned to @#{assignee.username}/ }
-
-    context 'assignee is removed' do
-      let(:assignee) { nil }
-
-      its(:note) { should =~ /Assignee removed/ }
-    end
-  end
-
-  describe '#create_cross_reference_note' do
-    let(:project)    { create(:project) }
-    let(:author)     { create(:user) }
-    let(:issue)      { create(:issue, project: project) }
-    let(:mergereq)   { create(:merge_request, :simple, target_project: project, source_project: project) }
-    let(:commit)     { project.repository.commit }
-
-    # Test all of {issue, merge request, commit} in both the referenced and referencing
-    # roles, to ensure that the correct information can be inferred from any argument.
-
-    context 'issue from a merge request' do
-      subject { Note.create_cross_reference_note(issue, mergereq, author, project) }
-
-      it { should be_valid }
-      its(:noteable) { should == issue }
-      its(:project)  { should == issue.project }
-      its(:author)   { should == author }
-      its(:note) { should == "_mentioned in merge request !#{mergereq.iid}_" }
-    end
-
-    context 'issue from a commit' do
-      subject { Note.create_cross_reference_note(issue, commit, author, project) }
-
-      it { should be_valid }
-      its(:noteable) { should == issue }
-      its(:note) { should == "_mentioned in commit #{commit.sha[0..5]}_" }
-    end
-
-    context 'merge request from an issue' do
-      subject { Note.create_cross_reference_note(mergereq, issue, author, project) }
-
-      it { should be_valid }
-      its(:noteable) { should == mergereq }
-      its(:project) { should == mergereq.project }
-      its(:note) { should == "_mentioned in issue ##{issue.iid}_" }
-    end
-
-    context 'commit from a merge request' do
-      subject { Note.create_cross_reference_note(commit, mergereq, author, project) }
-
-      it { should be_valid }
-      its(:noteable) { should == commit }
-      its(:project) { should == project }
-      its(:note) { should == "_mentioned in merge request !#{mergereq.iid}_" }
-    end
-
-    context 'commit from issue' do
-      subject { Note.create_cross_reference_note(commit, issue, author, project) }
-
-      it { should be_valid }
-      its(:noteable_type) { should == "Commit" }
-      its(:noteable_id) { should be_nil }
-      its(:commit_id) { should == commit.id }
-      its(:note) { should == "_mentioned in issue ##{issue.iid}_" }
-    end
-  end
-
-  describe '#cross_reference_exists?' do
-    let(:project) { create :project }
-    let(:author) { create :user }
-    let(:issue) { create :issue }
-    let(:commit0) { double 'commit0', gfm_reference: 'commit 123456' }
-    let(:commit1) { double 'commit1', gfm_reference: 'commit 654321' }
-
+  describe 'authorization' do
     before do
-      Note.create_cross_reference_note(issue, commit0, author, project)
-    end
-
-    it 'detects if a mentionable has already been mentioned' do
-      Note.cross_reference_exists?(issue, commit0).should be_true
-    end
-
-    it 'detects if a mentionable has not already been mentioned' do
-      Note.cross_reference_exists?(issue, commit1).should be_false
-    end
-  end
-
-  describe '#system?' do
-    let(:project) { create(:project) }
-    let(:issue)   { create(:issue, project: project) }
-    let(:other)   { create(:issue, project: project) }
-    let(:author)  { create(:user) }
-    let(:assignee) { create(:user) }
-
-    it 'should recognize user-supplied notes as non-system' do
-      @note = create(:note_on_issue)
-      @note.should_not be_system
-    end
-
-    it 'should identify status-change notes as system notes' do
-      @note = Note.create_status_change_note(issue, project, author, 'closed', nil)
-      @note.should be_system
-    end
-
-    it 'should identify cross-reference notes as system notes' do
-      @note = Note.create_cross_reference_note(issue, other, author, project)
-      @note.should be_system
-    end
-
-    it 'should identify assignee-change notes as system notes' do
-      @note = Note.create_assignee_change_note(issue, project, author, assignee)
-      @note.should be_system
-    end
-  end
-
-  describe :authorization do
-    before do
-      @p1 = create(:project)
-      @p2 = create(:project)
+      @p1 = create(:empty_project)
+      @p2 = create(:empty_project)
       @u1 = create(:user)
       @u2 = create(:user)
       @u3 = create(:user)
-      @abilities = Six.new
-      @abilities << Ability
     end
 
-    describe :read do
+    describe 'read' do
       before do
-        @p1.users_projects.create(user: @u2, project_access: UsersProject::GUEST)
-        @p2.users_projects.create(user: @u3, project_access: UsersProject::GUEST)
+        @p1.project_members.create(user: @u2, access_level: ProjectMember::GUEST)
+        @p2.project_members.create(user: @u3, access_level: ProjectMember::GUEST)
       end
 
-      it { @abilities.allowed?(@u1, :read_note, @p1).should be_false }
-      it { @abilities.allowed?(@u2, :read_note, @p1).should be_true }
-      it { @abilities.allowed?(@u3, :read_note, @p1).should be_false }
+      it { expect(Ability.allowed?(@u1, :read_note, @p1)).to be_falsey }
+      it { expect(Ability.allowed?(@u2, :read_note, @p1)).to be_truthy }
+      it { expect(Ability.allowed?(@u3, :read_note, @p1)).to be_falsey }
     end
 
-    describe :write do
+    describe 'write' do
       before do
-        @p1.users_projects.create(user: @u2, project_access: UsersProject::DEVELOPER)
-        @p2.users_projects.create(user: @u3, project_access: UsersProject::DEVELOPER)
+        @p1.project_members.create(user: @u2, access_level: ProjectMember::DEVELOPER)
+        @p2.project_members.create(user: @u3, access_level: ProjectMember::DEVELOPER)
       end
 
-      it { @abilities.allowed?(@u1, :write_note, @p1).should be_false }
-      it { @abilities.allowed?(@u2, :write_note, @p1).should be_true }
-      it { @abilities.allowed?(@u3, :write_note, @p1).should be_false }
+      it { expect(Ability.allowed?(@u1, :create_note, @p1)).to be_falsey }
+      it { expect(Ability.allowed?(@u2, :create_note, @p1)).to be_truthy }
+      it { expect(Ability.allowed?(@u3, :create_note, @p1)).to be_falsey }
     end
 
-    describe :admin do
+    describe 'admin' do
       before do
-        @p1.users_projects.create(user: @u1, project_access: UsersProject::REPORTER)
-        @p1.users_projects.create(user: @u2, project_access: UsersProject::MASTER)
-        @p2.users_projects.create(user: @u3, project_access: UsersProject::MASTER)
+        @p1.project_members.create(user: @u1, access_level: ProjectMember::REPORTER)
+        @p1.project_members.create(user: @u2, access_level: ProjectMember::MASTER)
+        @p2.project_members.create(user: @u3, access_level: ProjectMember::MASTER)
       end
 
-      it { @abilities.allowed?(@u1, :admin_note, @p1).should be_false }
-      it { @abilities.allowed?(@u2, :admin_note, @p1).should be_true }
-      it { @abilities.allowed?(@u3, :admin_note, @p1).should be_false }
+      it { expect(Ability.allowed?(@u1, :admin_note, @p1)).to be_falsey }
+      it { expect(Ability.allowed?(@u2, :admin_note, @p1)).to be_truthy }
+      it { expect(Ability.allowed?(@u3, :admin_note, @p1)).to be_falsey }
     end
   end
 
   it_behaves_like 'an editable mentionable' do
-    let(:issue) { create :issue, project: project }
-    let(:subject) { create :note, noteable: issue, project: project }
+    subject { create :note, noteable: issue, project: issue.project }
+
+    let(:issue) { create(:issue, project: create(:project, :repository)) }
     let(:backref_text) { issue.gfm_reference }
     let(:set_mentionable_text) { ->(txt) { subject.note = txt } }
+  end
+
+  describe "#all_references" do
+    let!(:note1) { create(:note_on_issue) }
+    let!(:note2) { create(:note_on_issue) }
+
+    it "reads the rendered note body from the cache" do
+      expect(Banzai::Renderer).to receive(:cache_collection_render).
+        with([{
+          text: note1.note,
+          context: {
+            skip_project_check: false,
+            pipeline: :note,
+            cache_key: [note1, "note"],
+            project: note1.project,
+            author: note1.author
+          }
+        }]).and_call_original
+
+      expect(Banzai::Renderer).to receive(:cache_collection_render).
+        with([{
+          text: note2.note,
+          context: {
+            skip_project_check: false,
+            pipeline: :note,
+            cache_key: [note2, "note"],
+            project: note2.project,
+            author: note2.author
+          }
+        }]).and_call_original
+
+      note1.all_references.users
+      note2.all_references.users
+    end
+  end
+
+  describe "editable?" do
+    it "returns true" do
+      note = build(:note)
+      expect(note.editable?).to be_truthy
+    end
+
+    it "returns false" do
+      note = build(:note, system: true)
+      expect(note.editable?).to be_falsy
+    end
+  end
+
+  describe "cross_reference_not_visible_for?" do
+    let(:private_user)    { create(:user) }
+    let(:private_project) { create(:empty_project, namespace: private_user.namespace) { |p| p.team << [private_user, :master] } }
+    let(:private_issue)   { create(:issue, project: private_project) }
+
+    let(:ext_proj)  { create(:empty_project, :public) }
+    let(:ext_issue) { create(:issue, project: ext_proj) }
+
+    let(:note) do
+      create :note,
+        noteable: ext_issue, project: ext_proj,
+        note: "mentioned in issue #{private_issue.to_reference(ext_proj)}",
+        system: true
+    end
+
+    it "returns true" do
+      expect(note.cross_reference_not_visible_for?(ext_issue.author)).to be_truthy
+    end
+
+    it "returns false" do
+      expect(note.cross_reference_not_visible_for?(private_user)).to be_falsy
+    end
+
+    it "returns false if user visible reference count set" do
+      note.user_visible_reference_count = 1
+
+      expect(note).not_to receive(:reference_mentionables)
+      expect(note.cross_reference_not_visible_for?(ext_issue.author)).to be_falsy
+    end
+
+    it "returns true if ref count is 0" do
+      note.user_visible_reference_count = 0
+
+      expect(note).not_to receive(:reference_mentionables)
+      expect(note.cross_reference_not_visible_for?(ext_issue.author)).to be_truthy
+    end
+  end
+
+  describe 'clear_blank_line_code!' do
+    it 'clears a blank line code before validation' do
+      note = build(:note, line_code: ' ')
+
+      expect { note.valid? }.to change(note, :line_code).to(nil)
+    end
+  end
+
+  describe '#participants' do
+    it 'includes the note author' do
+      project = create(:empty_project, :public)
+      issue = create(:issue, project: project)
+      note = create(:note_on_issue, noteable: issue, project: project)
+
+      expect(note.participants).to include(note.author)
+    end
+  end
+
+  describe ".grouped_diff_discussions" do
+    let!(:merge_request) { create(:merge_request) }
+    let(:project) { merge_request.project }
+    let!(:active_diff_note1) { create(:diff_note_on_merge_request, project: project, noteable: merge_request) }
+    let!(:active_diff_note2) { create(:diff_note_on_merge_request, project: project, noteable: merge_request) }
+    let!(:active_diff_note3) { create(:diff_note_on_merge_request, project: project, noteable: merge_request, position: active_position2) }
+    let!(:outdated_diff_note1) { create(:diff_note_on_merge_request, project: project, noteable: merge_request, position: outdated_position) }
+    let!(:outdated_diff_note2) { create(:diff_note_on_merge_request, project: project, noteable: merge_request, position: outdated_position) }
+
+    let(:active_position2) do
+      Gitlab::Diff::Position.new(
+        old_path: "files/ruby/popen.rb",
+        new_path: "files/ruby/popen.rb",
+        old_line: 16,
+        new_line: 22,
+        diff_refs: merge_request.diff_refs
+      )
+    end
+
+    let(:outdated_position) do
+      Gitlab::Diff::Position.new(
+        old_path: "files/ruby/popen.rb",
+        new_path: "files/ruby/popen.rb",
+        old_line: nil,
+        new_line: 9,
+        diff_refs: project.commit("874797c3a73b60d2187ed6e2fcabd289ff75171e").diff_refs
+      )
+    end
+
+    subject { merge_request.notes.grouped_diff_discussions }
+
+    it "includes active discussions" do
+      discussions = subject.values
+
+      expect(discussions.count).to eq(2)
+      expect(discussions.map(&:id)).to eq([active_diff_note1.discussion_id, active_diff_note3.discussion_id])
+      expect(discussions.all?(&:active?)).to be true
+
+      expect(discussions.first.notes).to eq([active_diff_note1, active_diff_note2])
+      expect(discussions.last.notes).to eq([active_diff_note3])
+    end
+
+    it "doesn't include outdated discussions" do
+      expect(subject.values.map(&:id)).not_to include(outdated_diff_note1.discussion_id)
+    end
+
+    it "groups the discussions by line code" do
+      expect(subject[active_diff_note1.line_code].id).to eq(active_diff_note1.discussion_id)
+      expect(subject[active_diff_note3.line_code].id).to eq(active_diff_note3.discussion_id)
+    end
+  end
+
+  describe "#discussion_id" do
+    let(:note) { create(:note) }
+
+    context "when it is newly created" do
+      it "has a discussion id" do
+        expect(note.discussion_id).not_to be_nil
+        expect(note.discussion_id).to match(/\A\h{40}\z/)
+      end
+    end
+
+    context "when it didn't store a discussion id before" do
+      before do
+        note.update_column(:discussion_id, nil)
+      end
+
+      it "has a discussion id" do
+        # The discussion_id is set in `after_initialize`, so `reload` won't work
+        reloaded_note = Note.find(note.id)
+
+        expect(reloaded_note.discussion_id).not_to be_nil
+        expect(reloaded_note.discussion_id).to match(/\A\h{40}\z/)
+      end
+    end
+  end
+
+  describe '#for_personal_snippet?' do
+    it 'returns false for a project snippet note' do
+      expect(build(:note_on_project_snippet).for_personal_snippet?).to be_falsy
+    end
+
+    it 'returns true for a personal snippet note' do
+      expect(build(:note_on_personal_snippet).for_personal_snippet?).to be_truthy
+    end
+  end
+
+  describe '#to_ability_name' do
+    it 'returns snippet for a project snippet note' do
+      expect(build(:note_on_project_snippet).to_ability_name).to eq('snippet')
+    end
+
+    it 'returns personal_snippet for a personal snippet note' do
+      expect(build(:note_on_personal_snippet).to_ability_name).to eq('personal_snippet')
+    end
+
+    it 'returns merge_request for an MR note' do
+      expect(build(:note_on_merge_request).to_ability_name).to eq('merge_request')
+    end
+
+    it 'returns issue for an issue note' do
+      expect(build(:note_on_issue).to_ability_name).to eq('issue')
+    end
+
+    it 'returns issue for a commit note' do
+      expect(build(:note_on_commit).to_ability_name).to eq('commit')
+    end
+  end
+
+  describe '#cache_markdown_field' do
+    let(:html) { '<p>some html</p>'}
+
+    context 'note for a project snippet' do
+      let(:note) { build(:note_on_project_snippet) }
+
+      before do
+        expect(Banzai::Renderer).to receive(:cacheless_render_field).
+          with(note, :note, { skip_project_check: false }).and_return(html)
+
+        note.save
+      end
+
+      it 'creates a note' do
+        expect(note.note_html).to eq(html)
+      end
+    end
+
+    context 'note for a personal snippet' do
+      let(:note) { build(:note_on_personal_snippet) }
+
+      before do
+        expect(Banzai::Renderer).to receive(:cacheless_render_field).
+          with(note, :note, { skip_project_check: true }).and_return(html)
+
+        note.save
+      end
+
+      it 'creates a note' do
+        expect(note.note_html).to eq(html)
+      end
+    end
   end
 end

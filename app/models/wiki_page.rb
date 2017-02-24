@@ -12,6 +12,32 @@ class WikiPage
     ActiveModel::Name.new(self, nil, 'wiki')
   end
 
+  # Sorts and groups pages by directory.
+  #
+  # pages - an array of WikiPage objects.
+  #
+  # Returns an array of WikiPage and WikiDirectory objects. The entries are
+  # sorted by alphabetical order (directories and pages inside each directory).
+  # Pages at the root level come before everything.
+  def self.group_by_directory(pages)
+    return [] if pages.blank?
+
+    pages.sort_by { |page| [page.directory, page.slug] }.
+      group_by(&:directory).
+      map do |dir, pages|
+        if dir.present?
+          WikiDirectory.new(dir, pages)
+        else
+          pages
+        end
+      end.
+      flatten
+  end
+
+  def self.unhyphenize(name)
+    name.gsub(/-+/, ' ')
+  end
+
   def to_key
     [:slug]
   end
@@ -29,6 +55,10 @@ class WikiPage
   # new Page values before writing to the Gollum repository.
   attr_accessor :attributes
 
+  def hook_attrs
+    attributes
+  end
+
   def initialize(wiki, page = nil, persisted = false)
     @wiki       = wiki
     @page       = page
@@ -40,15 +70,19 @@ class WikiPage
 
   # The escaped URL path of this page.
   def slug
-    @attributes[:slug]
+    if @attributes[:slug].present?
+      @attributes[:slug]
+    else
+      wiki.wiki.preview_page(title, '', format).url_path
+    end
   end
 
-  alias :to_param :slug
+  alias_method :to_param, :slug
 
   # The formatted title of this page.
   def title
     if @attributes[:title]
-      @attributes[:title].gsub(/-+/, ' ')
+      self.class.unhyphenize(@attributes[:title])
     else
       ""
     end
@@ -61,16 +95,17 @@ class WikiPage
 
   # The raw content of this page.
   def content
-    @attributes[:content] ||= if @page
-                                @page.raw_data
-                              end
+    @attributes[:content] ||= @page&.text_data
+  end
+
+  # The hierarchy of the directory this page is contained in.
+  def directory
+    wiki.page_title_and_dir(slug).last
   end
 
   # The processed/formatted content of this page.
   def formatted_content
-    @attributes[:formatted_content] ||= if @page
-                                          @page.formatted_data
-                                        end
+    @attributes[:formatted_content] ||= @page&.formatted_data
   end
 
   # The markup format for the page.
@@ -87,14 +122,14 @@ class WikiPage
   def version
     return nil unless persisted?
 
-    @version ||= Commit.new(Gitlab::Git::Commit.new(@page.version))
+    @version ||= @page.version
   end
 
   # Returns an array of Gitlab Commit instances.
   def versions
     return [] unless persisted?
 
-    @page.versions.map { |v| Commit.new(Gitlab::Git::Commit.new(v)) }
+    @page.versions
   end
 
   def commit
@@ -110,7 +145,7 @@ class WikiPage
   # Returns boolean True or False if this instance
   # is an old version of the page.
   def historical?
-    @page.historical?
+    @page.historical? && versions.first.sha != version.sha
   end
 
   # Returns boolean True or False if this instance
@@ -166,10 +201,20 @@ class WikiPage
     end
   end
 
+  # Relative path to the partial to be used when rendering collections
+  # of this object.
+  def to_partial_path
+    'projects/wikis/wiki_page'
+  end
+
+  def id
+    page.version.to_s
+  end
+
   private
 
   def set_attributes
-    attributes[:slug] = @page.escaped_url_path
+    attributes[:slug] = @page.url_path
     attributes[:title] = @page.title
     attributes[:format] = @page.format
   end
@@ -179,7 +224,8 @@ class WikiPage
     if valid? && project_wiki.send(method, *args)
 
       page_details = if method == :update_page
-                       @page.path
+                       # Use url_path instead of path to omit format extension
+                       @page.url_path
                      else
                        title
                      end

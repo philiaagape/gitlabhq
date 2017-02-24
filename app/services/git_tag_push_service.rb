@@ -1,40 +1,57 @@
-class GitTagPushService
-  attr_accessor :project, :user, :push_data
+class GitTagPushService < BaseService
+  attr_accessor :push_data
 
-  def execute(project, user, oldrev, newrev, ref)
-    @project, @user = project, user
-    @push_data = create_push_data(oldrev, newrev, ref)
+  def execute
+    project.repository.after_create if project.empty_repo?
+    project.repository.before_push_tag
 
-    create_push_event
-    project.repository.expire_cache
+    @push_data = build_push_data
+
+    EventCreateService.new.push(project, current_user, @push_data)
+    SystemHooksService.new.execute_hooks(build_system_push_data.dup, :tag_push_hooks)
     project.execute_hooks(@push_data.dup, :tag_push_hooks)
+    project.execute_services(@push_data.dup, :tag_push_hooks)
+    Ci::CreatePipelineService.new(project, current_user, @push_data).execute
+    ProjectCacheWorker.perform_async(project.id, [], [:commit_count, :repository_size])
+
+    true
   end
 
   private
 
-  def create_push_data(oldrev, newrev, ref)
-    data = {
-      ref: ref,
-      before: oldrev,
-      after: newrev,
-      user_id: user.id,
-      user_name: user.name,
-      project_id: project.id,
-      repository: {
-        name: project.name,
-        url: project.url_to_repo,
-        description: project.description,
-        homepage: project.web_url
-      }
-    }
+  def build_push_data
+    commits = []
+    message = nil
+
+    unless Gitlab::Git.blank_ref?(params[:newrev])
+      tag_name = Gitlab::Git.ref_name(params[:ref])
+      tag = project.repository.find_tag(tag_name)
+
+      if tag && tag.target == params[:newrev]
+        commit = project.commit(tag.dereferenced_target)
+        commits = [commit].compact
+        message = tag.message
+      end
+    end
+
+    Gitlab::DataBuilder::Push.build(
+      project,
+      current_user,
+      params[:oldrev],
+      params[:newrev],
+      params[:ref],
+      commits,
+      message)
   end
 
-  def create_push_event
-    Event.create!(
-      project: project,
-      action: Event::PUSHED,
-      data: push_data,
-      author_id: push_data[:user_id]
-    )
+  def build_system_push_data
+    Gitlab::DataBuilder::Push.build(
+      project,
+      current_user,
+      params[:oldrev],
+      params[:newrev],
+      params[:ref],
+      [],
+      '')
   end
 end

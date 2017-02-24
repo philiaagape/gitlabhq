@@ -1,18 +1,21 @@
 # Specifications for behavior common to all Mentionable implementations.
 # Requires a shared context containing:
-# - let(:subject) { "the mentionable implementation" }
+# - subject { "the mentionable implementation" }
 # - let(:backref_text) { "the way that +subject+ should refer to itself in backreferences " }
 # - let(:set_mentionable_text) { lambda { |txt| "block that assigns txt to the subject's mentionable_text" } }
 
-def common_mentionable_setup
-  # Avoid name collisions with let(:project) or let(:author) in the surrounding scope.
-  let(:mproject) { create :project }
-  let(:mauthor) { subject.author }
+shared_context 'mentionable context' do
+  let(:project) { subject.project }
+  let(:author)  { subject.author }
 
-  let(:mentioned_issue) { create :issue, project: mproject }
-  let(:other_issue) { create :issue, project: mproject }
-  let(:mentioned_mr) { create :merge_request, :simple, source_project: mproject }
-  let(:mentioned_commit) { double('commit', sha: '1234567890abcdef').as_null_object }
+  let(:mentioned_issue)  { create(:issue, project: project) }
+  let!(:mentioned_mr)     { create(:merge_request, source_project: project) }
+  let(:mentioned_commit) { project.commit("HEAD~1") }
+
+  let(:ext_proj)   { create(:project, :public, :repository) }
+  let(:ext_issue)  { create(:issue, project: ext_proj) }
+  let(:ext_mr)     { create(:merge_request, :simple, source_project: ext_proj) }
+  let(:ext_commit) { ext_proj.commit("HEAD~2") }
 
   # Override to add known commits to the repository stub.
   let(:extra_commits) { [] }
@@ -20,71 +23,122 @@ def common_mentionable_setup
   # A string that mentions each of the +mentioned_.*+ objects above. Mentionables should add a self-reference
   # to this string and place it in their +mentionable_text+.
   let(:ref_string) do
-    "mentions ##{mentioned_issue.iid} twice ##{mentioned_issue.iid}, !#{mentioned_mr.iid}, " +
-    "#{mentioned_commit.sha[0..5]} and itself as #{backref_text}"
+    <<-MSG.strip_heredoc
+      These references are new:
+        Issue:  #{mentioned_issue.to_reference}
+        Merge:  #{mentioned_mr.to_reference}
+        Commit: #{mentioned_commit.to_reference}
+
+      This reference is a repeat and should only be mentioned once:
+        Repeat: #{mentioned_issue.to_reference}
+
+      These references are cross-referenced:
+        Issue:  #{ext_issue.to_reference(project)}
+        Merge:  #{ext_mr.to_reference(project)}
+        Commit: #{ext_commit.to_reference(project)}
+
+      This is a self-reference and should not be mentioned at all:
+        Self: #{backref_text}
+    MSG
   end
 
   before do
-    # Wire the project's repository to return the mentioned commit, and +nil+ for any
-    # unrecognized commits.
-    commitmap = { '123456' => mentioned_commit }
-    extra_commits.each { |c| commitmap[c.sha[0..5]] = c }
-    mproject.repository.stub(:commit) { |sha| commitmap[sha] }
+    # Wire the project's repository to return the mentioned commit, and +nil+
+    # for any unrecognized commits.
+    allow_any_instance_of(::Repository).to receive(:commit).and_call_original
+    allow_any_instance_of(::Repository).to receive(:commit).with(mentioned_commit.short_id).and_return(mentioned_commit)
+    extra_commits.each do |commit|
+      allow_any_instance_of(::Repository).to receive(:commit).with(commit.short_id).and_return(commit)
+    end
+
     set_mentionable_text.call(ref_string)
+
+    project.team << [author, :developer]
   end
 end
 
 shared_examples 'a mentionable' do
-  common_mentionable_setup
+  include_context 'mentionable context'
 
   it 'generates a descriptive back-reference' do
-    subject.gfm_reference.should == backref_text
+    expect(subject.gfm_reference).to eq(backref_text)
   end
 
   it "extracts references from its reference property" do
     # De-duplicate and omit itself
-    refs = subject.references(mproject)
-
-    refs.should have(3).items
-    refs.should include(mentioned_issue)
-    refs.should include(mentioned_mr)
-    refs.should include(mentioned_commit)
+    refs = subject.referenced_mentionables
+    expect(refs.size).to eq(6)
+    expect(refs).to include(mentioned_issue)
+    expect(refs).to include(mentioned_mr)
+    expect(refs).to include(mentioned_commit)
+    expect(refs).to include(ext_issue)
+    expect(refs).to include(ext_mr)
+    expect(refs).to include(ext_commit)
   end
 
   it 'creates cross-reference notes' do
-    [mentioned_issue, mentioned_mr, mentioned_commit].each do |referenced|
-      Note.should_receive(:create_cross_reference_note).with(referenced, subject.local_reference, mauthor, mproject)
+    mentioned_objects = [mentioned_issue, mentioned_mr, mentioned_commit,
+                         ext_issue, ext_mr, ext_commit]
+
+    mentioned_objects.each do |referenced|
+      expect(SystemNoteService).to receive(:cross_reference).
+        with(referenced, subject.local_reference, author)
     end
 
-    subject.create_cross_references!(mproject, mauthor)
-  end
-
-  it 'detects existing cross-references' do
-    Note.create_cross_reference_note(mentioned_issue, subject.local_reference, mauthor, mproject)
-
-    subject.has_mentioned?(mentioned_issue).should be_true
-    subject.has_mentioned?(mentioned_mr).should be_false
+    subject.create_cross_references!
   end
 end
 
 shared_examples 'an editable mentionable' do
-  common_mentionable_setup
+  include_context 'mentionable context'
 
   it_behaves_like 'a mentionable'
 
-  it 'creates new cross-reference notes when the mentionable text is edited' do
-    new_text = "this text still mentions ##{mentioned_issue.iid} and #{mentioned_commit.sha[0..5]}, " +
-      "but now it mentions ##{other_issue.iid}, too."
+  let(:new_issues) do
+    [create(:issue, project: project), create(:issue, project: ext_proj)]
+  end
 
-    [mentioned_issue, mentioned_commit].each do |oldref|
-      Note.should_not_receive(:create_cross_reference_note).with(oldref, subject.local_reference,
-        mauthor, mproject)
+  it 'creates new cross-reference notes when the mentionable text is edited' do
+    subject.save
+    subject.create_cross_references!
+
+    new_text = <<-MSG.strip_heredoc
+      These references already existed:
+
+      Issue:  #{mentioned_issue.to_reference}
+
+      Commit: #{mentioned_commit.to_reference}
+
+      ---
+
+      This cross-project reference already existed:
+
+      Issue:  #{ext_issue.to_reference(project)}
+
+      ---
+
+      These two references are introduced in an edit:
+
+      Issue: #{new_issues[0].to_reference}
+
+      Cross: #{new_issues[1].to_reference(project)}
+    MSG
+
+    # These three objects were already referenced, and should not receive new
+    # notes
+    [mentioned_issue, mentioned_commit, ext_issue].each do |oldref|
+      expect(SystemNoteService).not_to receive(:cross_reference).
+        with(oldref, any_args)
     end
 
-    Note.should_receive(:create_cross_reference_note).with(other_issue, subject.local_reference, mauthor, mproject)
+    # These two issues are new and should receive reference notes
+    # In the case of MergeRequests remember that cannot mention commits included in the MergeRequest
+    new_issues.each do |newref|
+      expect(SystemNoteService).to receive(:cross_reference).
+        with(newref, subject.local_reference, author)
+    end
 
-    subject.save
     set_mentionable_text.call(new_text)
-    subject.notice_added_references(mproject, mauthor)
+    subject.create_new_cross_references!(author)
   end
 end

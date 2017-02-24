@@ -1,42 +1,21 @@
-class CreateProject < Spinach::FeatureSteps
+class Spinach::Features::ProjectCreate < Spinach::FeatureSteps
   include SharedAuthentication
   include SharedPaths
+  include SharedUser
 
-  And 'fill project form with valid data' do
-    fill_in 'project_name', with: 'Empty'
+  step 'fill project form with valid data' do
+    fill_in 'project_path', with: 'Empty'
     click_button "Create project"
   end
 
-  Then 'I should see project page' do
-    page.should have_content "Empty"
-    current_path.should == project_path(Project.last)
+  step 'I should see project page' do
+    expect(page).to have_content "Empty"
+    expect(current_path).to eq namespace_project_path(Project.last.namespace, Project.last)
   end
 
-  And 'I should see empty project instuctions' do
-    page.should have_content "git init"
-    page.should have_content "git remote"
-    page.should have_content Project.last.url_to_repo
-  end
-
-  Then 'I see empty project instuctions' do
-    page.should have_content "git init"
-    page.should have_content "git remote"
-    page.should have_content Project.last.url_to_repo
-  end
-
-  And 'I click on HTTP' do
-    click_button 'HTTP'
-  end
-
-  Then 'Remote url should update to http link' do
-    page.should have_content "git remote add origin #{Project.last.http_url_to_repo}"
-  end
-
-  And 'If I click on SSH' do
-    click_button 'SSH'
-  end
-
-  Then 'Remote url should update to ssh link' do
-    page.should have_content "git remote add origin #{Project.last.url_to_repo}"
+  step 'I should see empty project instructions' do
+    expect(page).to have_content "git init"
+    expect(page).to have_content "git remote"
+    expect(page).to have_content Project.last.url_to_repo
   end
 end

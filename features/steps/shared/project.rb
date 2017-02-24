@@ -2,37 +2,78 @@ module SharedProject
   include Spinach::DSL
 
   # Create a project without caring about what it's called
-  And "I own a project" do
-    @project = create(:project, namespace: @user.namespace)
+  step "I own a project" do
+    @project = create(:project, :repository, namespace: @user.namespace)
     @project.team << [@user, :master]
+  end
+
+  step "I own a project in some group namespace" do
+    @group = create(:group, name: 'some group')
+    @project = create(:project, namespace: @group)
+    @project.team << [@user, :master]
+  end
+
+  step "project exists in some group namespace" do
+    @group = create(:group, name: 'some group')
+    @project = create(:project, :repository, namespace: @group, public_builds: false)
   end
 
   # Create a specific project called "Shop"
-  And 'I own project "Shop"' do
+  step 'I own project "Shop"' do
     @project = Project.find_by(name: "Shop")
-    @project ||= create(:project, name: "Shop", namespace: @user.namespace, snippets_enabled: true)
+    @project ||= create(:project, :repository, name: "Shop", namespace: @user.namespace)
     @project.team << [@user, :master]
   end
 
+  step 'I disable snippets in project' do
+    @project.snippets_enabled = false
+    @project.save
+  end
+
+  step 'I disable issues and merge requests in project' do
+    @project.issues_enabled = false
+    @project.merge_requests_enabled = false
+    @project.save
+  end
+
+  # Add another user to project "Shop"
+  step 'I add a user to project "Shop"' do
+    @project = Project.find_by(name: "Shop")
+    other_user = create(:user, name: 'Alpha')
+    @project.team << [other_user, :master]
+  end
+
   # Create another specific project called "Forum"
-  And 'I own project "Forum"' do
+  step 'I own project "Forum"' do
     @project = Project.find_by(name: "Forum")
-    @project ||= create(:project, name: "Forum", namespace: @user.namespace, path: 'forum_project')
+    @project ||= create(:project, :repository, name: "Forum", namespace: @user.namespace, path: 'forum_project')
+    @project.build_project_feature
+    @project.project_feature.save
     @project.team << [@user, :master]
   end
 
   # Create an empty project without caring about the name
-  And 'I own an empty project' do
+  step 'I own an empty project' do
     @project = create(:empty_project,
                       name: 'Empty Project', namespace: @user.namespace)
     @project.team << [@user, :master]
   end
 
-  And 'project "Shop" has push event' do
+  step 'I visit my empty project page' do
+    project = Project.find_by(name: 'Empty Project')
+    visit namespace_project_path(project.namespace, project)
+  end
+
+  step 'I visit project "Shop" activity page' do
+    project = Project.find_by(name: 'Shop')
+    visit namespace_project_path(project.namespace, project)
+  end
+
+  step 'project "Shop" has push event' do
     @project = Project.find_by(name: "Shop")
 
     data = {
-      before: "0000000000000000000000000000000000000000",
+      before: Gitlab::Git::BLANK_SHA,
       after: "6d394385cf567f80a8fd85055db1ab4c5295806f",
       ref: "refs/heads/fix",
       user_id: @user.id,
@@ -54,15 +95,15 @@ module SharedProject
     )
   end
 
-  Then 'I should see project "Shop" activity feed' do
+  step 'I should see project "Shop" activity feed' do
     project = Project.find_by(name: "Shop")
-    page.should have_content "#{@user.name} pushed new branch fix at #{project.name_with_namespace}"
+    expect(page).to have_content "#{@user.name} pushed new branch fix at #{project.name_with_namespace}"
   end
 
-  Then 'I should see project settings' do
-    current_path.should == edit_project_path(@project)
-    page.should have_content("Project name")
-    page.should have_content("Features:")
+  step 'I should see project settings' do
+    expect(current_path).to eq edit_namespace_project_path(@project.namespace, @project)
+    expect(page).to have_content("Project name")
+    expect(page).to have_content("Sharing & Permissions")
   end
 
   def current_project
@@ -70,68 +111,112 @@ module SharedProject
   end
 
   # ----------------------------------------
+  # Project permissions
+  # ----------------------------------------
+
+  step 'I am member of a project with a guest role' do
+    @project.team << [@user, Gitlab::Access::GUEST]
+  end
+
+  step 'I am member of a project with a reporter role' do
+    @project.team << [@user, Gitlab::Access::REPORTER]
+  end
+
+  # ----------------------------------------
+  # Visibility of archived project
+  # ----------------------------------------
+
+  step 'archived project "Archive"' do
+    create(:project, :archived, :public, :repository, name: 'Archive')
+  end
+
+  step 'I should not see project "Archive"' do
+    project = Project.find_by(name: "Archive")
+    expect(page).not_to have_content project.name_with_namespace
+  end
+
+  step 'I should see project "Archive"' do
+    project = Project.find_by(name: "Archive")
+    expect(page).to have_content project.name_with_namespace
+  end
+
+  step 'project "Archive" has comments' do
+    project = Project.find_by(name: "Archive")
+    2.times { create(:note_on_issue, project: project) }
+  end
+
+  # ----------------------------------------
   # Visibility level
   # ----------------------------------------
 
   step 'private project "Enterprise"' do
-    create :project, name: 'Enterprise'
+    create(:project, :private, :repository, name: 'Enterprise')
   end
 
   step 'I should see project "Enterprise"' do
-    page.should have_content "Enterprise"
+    expect(page).to have_content "Enterprise"
   end
 
   step 'I should not see project "Enterprise"' do
-    page.should_not have_content "Enterprise"
+    expect(page).not_to have_content "Enterprise"
   end
 
   step 'internal project "Internal"' do
-    create :project, :internal, name: 'Internal'
+    create(:project, :internal, :repository, name: 'Internal')
   end
 
   step 'I should see project "Internal"' do
-    page.should have_content "Internal"
+    expect(page).to have_content "Internal"
   end
 
   step 'I should not see project "Internal"' do
-    page.should_not have_content "Internal"
+    expect(page).not_to have_content "Internal"
   end
 
   step 'public project "Community"' do
-    create :project, :public, name: 'Community'
+    create(:project, :public, :repository, name: 'Community')
   end
 
   step 'I should see project "Community"' do
-    page.should have_content "Community"
+    expect(page).to have_content "Community"
   end
 
   step 'I should not see project "Community"' do
-    page.should_not have_content "Community"
+    expect(page).not_to have_content "Community"
   end
 
   step '"John Doe" owns private project "Enterprise"' do
-    user = user_exists("John Doe", username: "john_doe")
-    project = Project.find_by(name: "Enterprise")
-    project ||= create(:empty_project, name: "Enterprise", namespace: user.namespace)
-    project.team << [user, :master]
+    user_owns_project(
+      user_name: 'John Doe',
+      project_name: 'Enterprise'
+    )
+  end
+
+  step '"Mary Jane" owns private project "Enterprise"' do
+    user_owns_project(
+      user_name: 'Mary Jane',
+      project_name: 'Enterprise'
+    )
   end
 
   step '"John Doe" owns internal project "Internal"' do
-    user = user_exists("John Doe", username: "john_doe")
-    project = Project.find_by(name: "Internal")
-    project ||= create :empty_project, :internal, name: 'Internal', namespace: user.namespace
-    project.team << [user, :master]
+    user_owns_project(
+      user_name: 'John Doe',
+      project_name: 'Internal',
+      visibility: :internal
+    )
   end
 
   step '"John Doe" owns public project "Community"' do
-    user = user_exists("John Doe", username: "john_doe")
-    project = Project.find_by(name: "Community")
-    project ||= create :empty_project, :public, name: 'Community', namespace: user.namespace
-    project.team << [user, :master]
+    user_owns_project(
+      user_name: 'John Doe',
+      project_name: 'Community',
+      visibility: :public
+    )
   end
 
   step 'public empty project "Empty Public Project"' do
-    create :empty_project, :public, name: "Empty Public Project"
+    create :project_empty_repo, :public, name: "Empty Public Project"
   end
 
   step 'project "Community" has comments' do
@@ -139,10 +224,55 @@ module SharedProject
     2.times { create(:note_on_issue, project: project) }
   end
 
+  step 'trending projects are refreshed' do
+    TrendingProject.refresh!
+  end
+
   step 'project "Shop" has labels: "bug", "feature", "enhancement"' do
     project = Project.find_by(name: "Shop")
     create(:label, project: project, title: 'bug')
     create(:label, project: project, title: 'feature')
     create(:label, project: project, title: 'enhancement')
+  end
+
+  step 'project "Shop" has issue: "bug report"' do
+    project = Project.find_by(name: "Shop")
+    create(:issue, project: project, title: "bug report")
+  end
+
+  step 'project "Shop" has CI enabled' do
+    project = Project.find_by(name: "Shop")
+    project.enable_ci
+  end
+
+  step 'project "Shop" has CI build' do
+    project = Project.find_by(name: "Shop")
+    create :ci_pipeline, project: project, sha: project.commit.sha, ref: 'master', status: 'skipped'
+  end
+
+  step 'I should see last commit with CI status' do
+    page.within ".project-last-commit" do
+      expect(page).to have_content(project.commit.sha[0..6])
+      expect(page).to have_content("skipped")
+    end
+  end
+
+  step 'The project is internal' do
+    @project.update(visibility_level: Gitlab::VisibilityLevel::INTERNAL)
+  end
+
+  step 'public access for builds is enabled' do
+    @project.update(public_builds: true)
+  end
+
+  step 'public access for builds is disabled' do
+    @project.update(public_builds: false)
+  end
+
+  def user_owns_project(user_name:, project_name:, visibility: :private)
+    user = user_exists(user_name, username: user_name.gsub(/\s/, '').underscore)
+    project = Project.find_by(name: project_name)
+    project ||= create(:empty_project, visibility, name: project_name, namespace: user.namespace)
+    project.team << [user, :master]
   end
 end

@@ -2,8 +2,14 @@
 # List methods you need to implement to get your CI service
 # working with GitLab Merge Requests
 class CiService < Service
-  def category
-    :ci
+  default_value_for :category, 'ci'
+
+  def valid_token?(token)
+    self.respond_to?(:token) && self.token.present? && ActiveSupport::SecurityUtils.variable_size_secure_compare(token, self.token)
+  end
+
+  def self.supported_events
+    %w(push)
   end
 
   # Return complete url to build page
@@ -11,24 +17,24 @@ class CiService < Service
   # Ex.
   #   http://jenkins.example.com:8888/job/test1/scm/bySHA1/12d65c
   #
-  def build_page(sha)
+  def build_page(sha, ref)
     # implement inside child
   end
 
   # Return string with build status or :error symbol
   #
-  # Allowed states: 'success', 'failed', 'running', 'pending'
+  # Allowed states: 'success', 'failed', 'running', 'pending', 'skipped'
   #
   #
   # Ex.
-  #   @service.commit_status('13be4ac')
+  #   @service.commit_status('13be4ac', 'master')
   #   # => 'success'
   #
-  #   @service.commit_status('2abe4ac')
+  #   @service.commit_status('2abe4ac', 'dev')
   #   # => 'running'
   #
   #
-  def commit_status(sha)
+  def commit_status(sha, ref)
     # implement inside child
   end
 end

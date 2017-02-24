@@ -1,13 +1,22 @@
-class CreateBranchService
-  def execute(project, branch_name, ref, current_user)
-    repository = project.repository
-    repository.add_branch(branch_name, ref)
-    new_branch = repository.find_branch(branch_name)
+class CreateBranchService < BaseService
+  def execute(branch_name, ref)
+    result = ValidateNewBranchService.new(project, current_user)
+      .execute(branch_name)
+
+    return result if result[:status] == :error
+
+    new_branch = repository.add_branch(current_user, branch_name, ref)
 
     if new_branch
-      Event.create_ref_event(project, current_user, new_branch, 'add')
+      success(new_branch)
+    else
+      error('Invalid reference name')
     end
+  rescue GitHooksService::PreReceiveError => ex
+    error(ex.message)
+  end
 
-    new_branch
+  def success(branch)
+    super().merge(branch: branch)
   end
 end

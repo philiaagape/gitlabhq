@@ -1,17 +1,16 @@
-class Profiles::PasswordsController < ApplicationController
+class Profiles::PasswordsController < Profiles::ApplicationController
+  skip_before_action :check_password_expiration, only: [:new, :create]
+
+  before_action :set_user
+  before_action :authorize_change_password!
+
   layout :determine_layout
-
-  skip_before_filter :check_password_expiration, only: [:new, :create]
-
-  before_filter :set_user
-  before_filter :set_title
-  before_filter :authorize_change_password!
 
   def new
   end
 
   def create
-    unless @user.valid_password?(user_params[:current_password])
+    unless @user.password_automatically_set || @user.valid_password?(user_params[:current_password])
       redirect_to new_profile_password_path, alert: 'You must provide a valid current password'
       return
     end
@@ -21,7 +20,8 @@ class Profiles::PasswordsController < ApplicationController
 
     result = @user.update_attributes(
       password: new_password,
-      password_confirmation: new_password_confirmation
+      password_confirmation: new_password_confirmation,
+      password_automatically_set: false
     )
 
     if result
@@ -39,8 +39,9 @@ class Profiles::PasswordsController < ApplicationController
     password_attributes = user_params.select do |key, value|
       %w(password password_confirmation).include?(key.to_s)
     end
+    password_attributes[:password_automatically_set] = false
 
-    unless @user.valid_password?(user_params[:current_password])
+    unless @user.password_automatically_set || @user.valid_password?(user_params[:current_password])
       redirect_to edit_profile_password_path, alert: 'You must provide a valid current password'
       return
     end
@@ -49,6 +50,7 @@ class Profiles::PasswordsController < ApplicationController
       flash[:notice] = "Password was successfully updated. Please login with it"
       redirect_to new_user_session_path
     else
+      @user.reload
       render 'edit'
     end
   end
@@ -64,13 +66,9 @@ class Profiles::PasswordsController < ApplicationController
     @user = current_user
   end
 
-  def set_title
-    @title = "New password"
-  end
-
   def determine_layout
     if [:new, :create].include?(action_name.to_sym)
-      'navless'
+      'application'
     else
       'profile'
     end

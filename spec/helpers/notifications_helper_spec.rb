@@ -2,34 +2,15 @@ require 'spec_helper'
 
 describe NotificationsHelper do
   describe 'notification_icon' do
-    let(:notification) { double(disabled?: false, participating?: false, watch?: false) }
+    it { expect(notification_icon(:disabled)).to match('class="fa fa-microphone-slash fa-fw"') }
+    it { expect(notification_icon(:participating)).to match('class="fa fa-volume-up fa-fw"') }
+    it { expect(notification_icon(:mention)).to match('class="fa fa-at fa-fw"') }
+    it { expect(notification_icon(:global)).to match('class="fa fa-globe fa-fw"') }
+    it { expect(notification_icon(:watch)).to match('class="fa fa-eye fa-fw"') }
+  end
 
-    context "disabled notification" do
-      before { notification.stub(disabled?: true) }
-
-      it "has a red icon" do
-        notification_icon(notification).should match('class="icon-volume-off ns-mute"')
-      end
-    end
-
-    context "participating notification" do
-      before { notification.stub(participating?: true) }
-
-      it "has a blue icon" do
-        notification_icon(notification).should match('class="icon-volume-down ns-part"')
-      end
-    end
-
-    context "watched notification" do
-      before { notification.stub(watch?: true) }
-
-      it "has a green icon" do
-        notification_icon(notification).should match('class="icon-volume-up ns-watch"')
-      end
-    end
-
-    it "has a blue icon" do
-      notification_icon(notification).should match('class="icon-circle-blank ns-default"')
-    end
+  describe 'notification_title' do
+    it { expect(notification_title(:watch)).to match('Watch') }
+    it { expect(notification_title(:mention)).to match('On mention') }
   end
 end

@@ -1,163 +1,315 @@
 require 'spec_helper'
 
-describe API::API, api: true  do
+describe API::Users, api: true  do
   include ApiHelpers
 
   let(:user)  { create(:user) }
   let(:admin) { create(:admin) }
   let(:key)   { create(:key, user: user) }
+  let(:email)   { create(:email, user: user) }
+  let(:omniauth_user) { create(:omniauth_user) }
+  let(:ldap_user) { create(:omniauth_user, provider: 'ldapmain') }
+  let(:ldap_blocked_user) { create(:omniauth_user, provider: 'ldapmain', state: 'ldap_blocked') }
 
   describe "GET /users" do
     context "when unauthenticated" do
-      it "should return authentication error" do
+      it "returns authentication error" do
         get api("/users")
-        response.status.should == 401
+        expect(response).to have_http_status(401)
       end
     end
 
     context "when authenticated" do
-      it "should return an array of users" do
+      # These specs are written just in case API authentication is not required anymore
+      context "when public level is restricted" do
+        before do
+          stub_application_setting(restricted_visibility_levels: [Gitlab::VisibilityLevel::PUBLIC])
+          allow_any_instance_of(API::Helpers).to receive(:authenticate!).and_return(true)
+        end
+
+        it "renders 403" do
+          get api("/users")
+          expect(response).to have_http_status(403)
+        end
+
+        it "renders 404" do
+          get api("/users/#{user.id}")
+          expect(response).to have_http_status(404)
+        end
+      end
+
+      it "returns an array of users" do
         get api("/users", user)
-        response.status.should == 200
-        json_response.should be_an Array
-        json_response.first['username'].should == user.username
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        username = user.username
+        expect(json_response.detect do |user|
+          user['username'] == username
+        end['username']).to eq(username)
+      end
+
+      it "returns an array of blocked users" do
+        ldap_blocked_user
+        create(:user, state: 'blocked')
+
+        get api("/users?blocked=true", user)
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response).to all(include('state' => /(blocked|ldap_blocked)/))
+      end
+
+      it "returns one user" do
+        get api("/users?username=#{omniauth_user.username}", user)
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first['username']).to eq(omniauth_user.username)
       end
     end
 
     context "when admin" do
-      it "should return an array of users" do
+      it "returns an array of users" do
         get api("/users", admin)
-        response.status.should == 200
-        json_response.should be_an Array
-        json_response.first.keys.should include 'email'
-        json_response.first.keys.should include 'extern_uid'
-        json_response.first.keys.should include 'can_create_project'
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first.keys).to include 'email'
+        expect(json_response.first.keys).to include 'organization'
+        expect(json_response.first.keys).to include 'identities'
+        expect(json_response.first.keys).to include 'can_create_project'
+        expect(json_response.first.keys).to include 'two_factor_enabled'
+        expect(json_response.first.keys).to include 'last_sign_in_at'
+        expect(json_response.first.keys).to include 'confirmed_at'
+      end
+
+      it "returns an array of external users" do
+        create(:user, external: true)
+
+        get api("/users?external=true", admin)
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response).to all(include('external' => true))
       end
     end
   end
 
   describe "GET /users/:id" do
-    it "should return a user by id" do
+    it "returns a user by id" do
       get api("/users/#{user.id}", user)
-      response.status.should == 200
-      json_response['username'].should == user.username
+      expect(response).to have_http_status(200)
+      expect(json_response['username']).to eq(user.username)
     end
 
-    it "should return a 401 if unauthenticated" do
+    it "returns a 401 if unauthenticated" do
       get api("/users/9998")
-      response.status.should == 401
+      expect(response).to have_http_status(401)
     end
 
-    it "should return a 404 error if user id not found" do
+    it "returns a 404 error if user id not found" do
       get api("/users/9999", user)
-      response.status.should == 404
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
+    end
+
+    it "returns a 404 for invalid ID" do
+      get api("/users/1ASDF", user)
+
+      expect(response).to have_http_status(404)
     end
   end
 
   describe "POST /users" do
     before{ admin }
 
-    it "should create user" do
-      expect {
+    it "creates user" do
+      expect do
         post api("/users", admin), attributes_for(:user, projects_limit: 3)
-      }.to change { User.count }.by(1)
+      end.to change { User.count }.by(1)
     end
 
-    it "should create user with correct attributes" do
+    it "creates user with correct attributes" do
       post api('/users', admin), attributes_for(:user, admin: true, can_create_group: true)
-      response.status.should == 201
+      expect(response).to have_http_status(201)
       user_id = json_response['id']
       new_user = User.find(user_id)
-      new_user.should_not == nil
-      new_user.admin.should == true
-      new_user.can_create_group.should == true
+      expect(new_user).not_to eq(nil)
+      expect(new_user.admin).to eq(true)
+      expect(new_user.can_create_group).to eq(true)
     end
 
-    it "should create non-admin user" do
+    it "creates user with optional attributes" do
+      optional_attributes = { confirm: true }
+      attributes = attributes_for(:user).merge(optional_attributes)
+
+      post api('/users', admin), attributes
+
+      expect(response).to have_http_status(201)
+    end
+
+    it "creates non-admin user" do
       post api('/users', admin), attributes_for(:user, admin: false, can_create_group: false)
-      response.status.should == 201
+      expect(response).to have_http_status(201)
       user_id = json_response['id']
       new_user = User.find(user_id)
-      new_user.should_not == nil
-      new_user.admin.should == false
-      new_user.can_create_group.should == false
+      expect(new_user).not_to eq(nil)
+      expect(new_user.admin).to eq(false)
+      expect(new_user.can_create_group).to eq(false)
     end
 
-    it "should create non-admin users by default" do
+    it "creates non-admin users by default" do
       post api('/users', admin), attributes_for(:user)
-      response.status.should == 201
+      expect(response).to have_http_status(201)
       user_id = json_response['id']
       new_user = User.find(user_id)
-      new_user.should_not == nil
-      new_user.admin.should == false
+      expect(new_user).not_to eq(nil)
+      expect(new_user.admin).to eq(false)
     end
 
-    it "should return 201 Created on success" do
+    it "returns 201 Created on success" do
       post api("/users", admin), attributes_for(:user, projects_limit: 3)
-      response.status.should == 201
+      expect(response).to have_http_status(201)
     end
 
-    it "should not create user with invalid email" do
-      post api("/users", admin), { email: "invalid email", password: 'password' }
-      response.status.should == 400
+    it 'creates non-external users by default' do
+      post api("/users", admin), attributes_for(:user)
+      expect(response).to have_http_status(201)
+
+      user_id = json_response['id']
+      new_user = User.find(user_id)
+      expect(new_user).not_to eq nil
+      expect(new_user.external).to be_falsy
     end
 
-    it "should return 400 error if password not given" do
-      post api("/users", admin), { email: 'test@example.com' }
-      response.status.should == 400
+    it 'allows an external user to be created' do
+      post api("/users", admin), attributes_for(:user, external: true)
+      expect(response).to have_http_status(201)
+
+      user_id = json_response['id']
+      new_user = User.find(user_id)
+      expect(new_user).not_to eq nil
+      expect(new_user.external).to be_truthy
     end
 
-    it "should return 400 error if email not given" do
-      post api("/users", admin), { password: 'pass1234' }
-      response.status.should == 400
+    it "creates user with reset password" do
+      post api('/users', admin), attributes_for(:user, reset_password: true).except(:password)
+
+      expect(response).to have_http_status(201)
+
+      user_id = json_response['id']
+      new_user = User.find(user_id)
+
+      expect(new_user).not_to eq(nil)
+      expect(new_user.recently_sent_password_reset?).to eq(true)
     end
 
-    it "shouldn't available for non admin users" do
+    it "does not create user with invalid email" do
+      post api('/users', admin),
+        email: 'invalid email',
+        password: 'password',
+        name: 'test'
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 error if name not given' do
+      post api('/users', admin), attributes_for(:user).except(:name)
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 error if password not given' do
+      post api('/users', admin), attributes_for(:user).except(:password)
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 error if email not given' do
+      post api('/users', admin), attributes_for(:user).except(:email)
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 error if username not given' do
+      post api('/users', admin), attributes_for(:user).except(:username)
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 error if user does not validate' do
+      post api('/users', admin),
+        password: 'pass',
+        email: 'test@example.com',
+        username: 'test!',
+        name: 'test',
+        bio: 'g' * 256,
+        projects_limit: -1
+      expect(response).to have_http_status(400)
+      expect(json_response['message']['password']).
+        to eq(['is too short (minimum is 8 characters)'])
+      expect(json_response['message']['bio']).
+        to eq(['is too long (maximum is 255 characters)'])
+      expect(json_response['message']['projects_limit']).
+        to eq(['must be greater than or equal to 0'])
+      expect(json_response['message']['username']).
+        to eq([Gitlab::Regex.namespace_regex_message])
+    end
+
+    it "is not available for non admin users" do
       post api("/users", user), attributes_for(:user)
-      response.status.should == 403
+      expect(response).to have_http_status(403)
     end
 
-    context "with existing user" do
-      before { post api("/users", admin), { email: 'test@example.com', password: 'password', username: 'test' } }
-
-      it "should not create user with same email" do
-        expect {
-          post api("/users", admin), { email: 'test@example.com', password: 'password' }
-        }.to change { User.count }.by(0)
+    context 'with existing user' do
+      before do
+        post api('/users', admin),
+          email: 'test@example.com',
+          password: 'password',
+          username: 'test',
+          name: 'foo'
       end
 
-      it "should return 409 conflict error if user with email exists" do
-        post api("/users", admin), { email: 'test@example.com', password: 'password' }
+      it 'returns 409 conflict error if user with same email exists' do
+        expect do
+          post api('/users', admin),
+            name: 'foo',
+            email: 'test@example.com',
+            password: 'password',
+            username: 'foo'
+        end.to change { User.count }.by(0)
+        expect(response).to have_http_status(409)
+        expect(json_response['message']).to eq('Email has already been taken')
       end
 
-      it "should return 409 conflict error if same username exists" do
-        post api("/users", admin), { email: 'foo@example.com', password: 'pass', username: 'test' }
+      it 'returns 409 conflict error if same username exists' do
+        expect do
+          post api('/users', admin),
+            name: 'foo',
+            email: 'foo@example.com',
+            password: 'password',
+            username: 'test'
+        end.to change { User.count }.by(0)
+        expect(response).to have_http_status(409)
+        expect(json_response['message']).to eq('Username has already been taken')
+      end
+
+      it 'creates user with new identity' do
+        post api("/users", admin), attributes_for(:user, provider: 'github', extern_uid: '67890')
+
+        expect(response).to have_http_status(201)
+        expect(json_response['identities'].first['extern_uid']).to eq('67890')
+        expect(json_response['identities'].first['provider']).to eq('github')
       end
     end
   end
 
   describe "GET /users/sign_up" do
-    context 'enabled' do
-      before do
-        Gitlab.config.gitlab.stub(:signup_enabled).and_return(true)
-      end
-
-      it "should return sign up page if signup is enabled" do
-        get "/users/sign_up"
-        response.status.should == 200
-      end
-    end
-
-    context 'disabled' do
-      before do
-        Gitlab.config.gitlab.stub(:signup_enabled).and_return(false)
-      end
-
-      it "should redirect to sign in page if signup is disabled" do
-        get "/users/sign_up"
-        response.status.should == 302
-        response.should redirect_to(new_user_session_path)
-      end
+    it "redirects to sign in page" do
+      get "/users/sign_up"
+      expect(response).to have_http_status(302)
+      expect(response).to redirect_to(new_user_session_path)
     end
   end
 
@@ -166,271 +318,833 @@ describe API::API, api: true  do
 
     before { admin }
 
-    it "should update user with new bio" do
-      put api("/users/#{user.id}", admin), {bio: 'new test bio'}
-      response.status.should == 200
-      json_response['bio'].should == 'new test bio'
-      user.reload.bio.should == 'new test bio'
+    it "updates user with new bio" do
+      put api("/users/#{user.id}", admin), { bio: 'new test bio' }
+      expect(response).to have_http_status(200)
+      expect(json_response['bio']).to eq('new test bio')
+      expect(user.reload.bio).to eq('new test bio')
     end
 
-    it "should update admin status" do
-      put api("/users/#{user.id}", admin), {admin: true}
-      response.status.should == 200
-      json_response['is_admin'].should == true
-      user.reload.admin.should == true
+    it "updates user with new password and forces reset on next login" do
+      put api("/users/#{user.id}", admin), password: '12345678'
+
+      expect(response).to have_http_status(200)
+      expect(user.reload.password_expires_at).to be <= Time.now
     end
 
-    it "should not update admin status" do
-      put api("/users/#{admin_user.id}", admin), {can_create_group: false}
-      response.status.should == 200
-      json_response['is_admin'].should == true
-      admin_user.reload.admin.should == true
-      admin_user.can_create_group.should == false
+    it "updates user with organization" do
+      put api("/users/#{user.id}", admin), { organization: 'GitLab' }
+
+      expect(response).to have_http_status(200)
+      expect(json_response['organization']).to eq('GitLab')
+      expect(user.reload.organization).to eq('GitLab')
     end
 
-    it "should not allow invalid update" do
-      put api("/users/#{user.id}", admin), {email: 'invalid email'}
-      response.status.should == 404
-      user.reload.email.should_not == 'invalid email'
+    it 'updates user with his own email' do
+      put api("/users/#{user.id}", admin), email: user.email
+      expect(response).to have_http_status(200)
+      expect(json_response['email']).to eq(user.email)
+      expect(user.reload.email).to eq(user.email)
     end
 
-    it "shouldn't available for non admin users" do
+    it 'updates user with his own username' do
+      put api("/users/#{user.id}", admin), username: user.username
+      expect(response).to have_http_status(200)
+      expect(json_response['username']).to eq(user.username)
+      expect(user.reload.username).to eq(user.username)
+    end
+
+    it "updates user's existing identity" do
+      put api("/users/#{omniauth_user.id}", admin), provider: 'ldapmain', extern_uid: '654321'
+      expect(response).to have_http_status(200)
+      expect(omniauth_user.reload.identities.first.extern_uid).to eq('654321')
+    end
+
+    it 'updates user with new identity' do
+      put api("/users/#{user.id}", admin), provider: 'github', extern_uid: 'john'
+      expect(response).to have_http_status(200)
+      expect(user.reload.identities.first.extern_uid).to eq('john')
+      expect(user.reload.identities.first.provider).to eq('github')
+    end
+
+    it "updates admin status" do
+      put api("/users/#{user.id}", admin), { admin: true }
+      expect(response).to have_http_status(200)
+      expect(json_response['is_admin']).to eq(true)
+      expect(user.reload.admin).to eq(true)
+    end
+
+    it "updates external status" do
+      put api("/users/#{user.id}", admin), { external: true }
+      expect(response.status).to eq 200
+      expect(json_response['external']).to eq(true)
+      expect(user.reload.external?).to be_truthy
+    end
+
+    it "does not update admin status" do
+      put api("/users/#{admin_user.id}", admin), { can_create_group: false }
+      expect(response).to have_http_status(200)
+      expect(json_response['is_admin']).to eq(true)
+      expect(admin_user.reload.admin).to eq(true)
+      expect(admin_user.can_create_group).to eq(false)
+    end
+
+    it "does not allow invalid update" do
+      put api("/users/#{user.id}", admin), { email: 'invalid email' }
+      expect(response).to have_http_status(400)
+      expect(user.reload.email).not_to eq('invalid email')
+    end
+
+    it "is not available for non admin users" do
       put api("/users/#{user.id}", user), attributes_for(:user)
-      response.status.should == 403
+      expect(response).to have_http_status(403)
     end
 
-    it "should return 404 for non-existing user" do
-      put api("/users/999999", admin), {bio: 'update should fail'}
-      response.status.should == 404
+    it "returns 404 for non-existing user" do
+      put api("/users/999999", admin), { bio: 'update should fail' }
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
+    end
+
+    it "returns a 404 if invalid ID" do
+      put api("/users/ASDF", admin)
+
+      expect(response).to have_http_status(404)
+    end
+
+    it 'returns 400 error if user does not validate' do
+      put api("/users/#{user.id}", admin),
+        password: 'pass',
+        email: 'test@example.com',
+        username: 'test!',
+        name: 'test',
+        bio: 'g' * 256,
+        projects_limit: -1
+      expect(response).to have_http_status(400)
+      expect(json_response['message']['password']).
+        to eq(['is too short (minimum is 8 characters)'])
+      expect(json_response['message']['bio']).
+        to eq(['is too long (maximum is 255 characters)'])
+      expect(json_response['message']['projects_limit']).
+        to eq(['must be greater than or equal to 0'])
+      expect(json_response['message']['username']).
+        to eq([Gitlab::Regex.namespace_regex_message])
+    end
+
+    it 'returns 400 if provider is missing for identity update' do
+      put api("/users/#{omniauth_user.id}", admin), extern_uid: '654321'
+
+      expect(response).to have_http_status(400)
+    end
+
+    it 'returns 400 if external UID is missing for identity update' do
+      put api("/users/#{omniauth_user.id}", admin), provider: 'ldap'
+
+      expect(response).to have_http_status(400)
     end
 
     context "with existing user" do
-      before {
+      before do
         post api("/users", admin), { email: 'test@example.com', password: 'password', username: 'test', name: 'test' }
         post api("/users", admin), { email: 'foo@bar.com', password: 'password', username: 'john', name: 'john' }
-        @user_id = User.all.last.id
-      }
+        @user = User.all.last
+      end
 
-#      it "should return 409 conflict error if email address exists" do
-#        put api("/users/#{@user_id}", admin), { email: 'test@example.com' }
-#        response.status.should == 409
-#      end
-#
-#      it "should return 409 conflict error if username taken" do
-#        @user_id = User.all.last.id
-#        put api("/users/#{@user_id}", admin), { username: 'test' }
-#        response.status.should == 409
-#      end
+      it 'returns 409 conflict error if email address exists' do
+        put api("/users/#{@user.id}", admin), email: 'test@example.com'
+        expect(response).to have_http_status(409)
+        expect(@user.reload.email).to eq(@user.email)
+      end
+
+      it 'returns 409 conflict error if username taken' do
+        @user_id = User.all.last.id
+        put api("/users/#{@user.id}", admin), username: 'test'
+        expect(response).to have_http_status(409)
+        expect(@user.reload.username).to eq(@user.username)
+      end
     end
   end
 
   describe "POST /users/:id/keys" do
     before { admin }
 
-    it "should not create invalid ssh key" do
+    it "does not create invalid ssh key" do
       post api("/users/#{user.id}/keys", admin), { title: "invalid key" }
-      response.status.should == 404
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('key is missing')
     end
 
-    it "should create ssh key" do
+    it 'does not create key without title' do
+      post api("/users/#{user.id}/keys", admin), key: 'some key'
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('title is missing')
+    end
+
+    it "creates ssh key" do
       key_attrs = attributes_for :key
-      expect {
+      expect do
         post api("/users/#{user.id}/keys", admin), key_attrs
-      }.to change{ user.keys.count }.by(1)
+      end.to change{ user.keys.count }.by(1)
+    end
+
+    it "returns 400 for invalid ID" do
+      post api("/users/999999/keys", admin)
+      expect(response).to have_http_status(400)
     end
   end
 
-  describe 'GET /user/:uid/keys' do
+  describe 'GET /user/:id/keys' do
     before { admin }
 
     context 'when unauthenticated' do
-      it 'should return authentication error' do
+      it 'returns authentication error' do
         get api("/users/#{user.id}/keys")
-        response.status.should == 401
+        expect(response).to have_http_status(401)
       end
     end
 
     context 'when authenticated' do
-      it 'should return 404 for non-existing user' do
+      it 'returns 404 for non-existing user' do
         get api('/users/999999/keys', admin)
-        response.status.should == 404
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 User Not Found')
       end
 
-      it 'should return array of ssh keys' do
+      it 'returns array of ssh keys' do
         user.keys << key
         user.save
+
         get api("/users/#{user.id}/keys", admin)
-        response.status.should == 200
-        json_response.should be_an Array
-        json_response.first['title'].should == key.title
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first['title']).to eq(key.title)
       end
     end
   end
 
-  describe 'DELETE /user/:uid/keys/:id' do
+  describe 'DELETE /user/:id/keys/:key_id' do
     before { admin }
 
     context 'when unauthenticated' do
-      it 'should return authentication error' do
+      it 'returns authentication error' do
         delete api("/users/#{user.id}/keys/42")
-        response.status.should == 401
+        expect(response).to have_http_status(401)
       end
     end
 
     context 'when authenticated' do
-      it 'should delete existing key' do
+      it 'deletes existing key' do
         user.keys << key
         user.save
-        expect {
+        expect do
           delete api("/users/#{user.id}/keys/#{key.id}", admin)
-        }.to change { user.keys.count }.by(-1)
-        response.status.should == 200
+        end.to change { user.keys.count }.by(-1)
+        expect(response).to have_http_status(200)
       end
 
-      it 'should return 404 error if user not found' do
+      it 'returns 404 error if user not found' do
         user.keys << key
         user.save
         delete api("/users/999999/keys/#{key.id}", admin)
-        response.status.should == 404
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 User Not Found')
       end
 
-      it 'should return 404 error if key not foud' do
+      it 'returns 404 error if key not foud' do
         delete api("/users/#{user.id}/keys/42", admin)
-        response.status.should == 404
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 Key Not Found')
+      end
+    end
+  end
+
+  describe "POST /users/:id/emails" do
+    before { admin }
+
+    it "does not create invalid email" do
+      post api("/users/#{user.id}/emails", admin), {}
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('email is missing')
+    end
+
+    it "creates email" do
+      email_attrs = attributes_for :email
+      expect do
+        post api("/users/#{user.id}/emails", admin), email_attrs
+      end.to change{ user.emails.count }.by(1)
+    end
+
+    it "returns a 400 for invalid ID" do
+      post api("/users/999999/emails", admin)
+
+      expect(response).to have_http_status(400)
+    end
+  end
+
+  describe 'GET /user/:id/emails' do
+    before { admin }
+
+    context 'when unauthenticated' do
+      it 'returns authentication error' do
+        get api("/users/#{user.id}/emails")
+        expect(response).to have_http_status(401)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'returns 404 for non-existing user' do
+        get api('/users/999999/emails', admin)
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 User Not Found')
+      end
+
+      it 'returns array of emails' do
+        user.emails << email
+        user.save
+
+        get api("/users/#{user.id}/emails", admin)
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first['email']).to eq(email.email)
+      end
+
+      it "returns a 404 for invalid ID" do
+        put api("/users/ASDF/emails", admin)
+
+        expect(response).to have_http_status(404)
+      end
+    end
+  end
+
+  describe 'DELETE /user/:id/emails/:email_id' do
+    before { admin }
+
+    context 'when unauthenticated' do
+      it 'returns authentication error' do
+        delete api("/users/#{user.id}/emails/42")
+        expect(response).to have_http_status(401)
+      end
+    end
+
+    context 'when authenticated' do
+      it 'deletes existing email' do
+        user.emails << email
+        user.save
+        expect do
+          delete api("/users/#{user.id}/emails/#{email.id}", admin)
+        end.to change { user.emails.count }.by(-1)
+        expect(response).to have_http_status(200)
+      end
+
+      it 'returns 404 error if user not found' do
+        user.emails << email
+        user.save
+        delete api("/users/999999/emails/#{email.id}", admin)
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 User Not Found')
+      end
+
+      it 'returns 404 error if email not foud' do
+        delete api("/users/#{user.id}/emails/42", admin)
+        expect(response).to have_http_status(404)
+        expect(json_response['message']).to eq('404 Email Not Found')
+      end
+
+      it "returns a 404 for invalid ID" do
+        delete api("/users/ASDF/emails/bar", admin)
+
+        expect(response).to have_http_status(404)
       end
     end
   end
 
   describe "DELETE /users/:id" do
+    let!(:namespace) { user.namespace }
     before { admin }
 
-    it "should delete user" do
+    it "deletes user" do
       delete api("/users/#{user.id}", admin)
-      response.status.should == 200
+      expect(response).to have_http_status(200)
       expect { User.find(user.id) }.to raise_error ActiveRecord::RecordNotFound
-      json_response['email'].should == user.email
+      expect { Namespace.find(namespace.id) }.to raise_error ActiveRecord::RecordNotFound
+      expect(json_response['email']).to eq(user.email)
     end
 
-    it "should not delete for unauthenticated user" do
+    it "does not delete for unauthenticated user" do
       delete api("/users/#{user.id}")
-      response.status.should == 401
+      expect(response).to have_http_status(401)
     end
 
-    it "shouldn't available for non admin users" do
+    it "is not available for non admin users" do
       delete api("/users/#{user.id}", user)
-      response.status.should == 403
+      expect(response).to have_http_status(403)
     end
 
-    it "should return 404 for non-existing user" do
+    it "returns 404 for non-existing user" do
       delete api("/users/999999", admin)
-      response.status.should == 404
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
+    end
+
+    it "returns a 404 for invalid ID" do
+      delete api("/users/ASDF", admin)
+
+      expect(response).to have_http_status(404)
     end
   end
 
   describe "GET /user" do
-    it "should return current user" do
-      get api("/user", user)
-      response.status.should == 200
-      json_response['email'].should == user.email
-      json_response['is_admin'].should == user.is_admin?
-      json_response['can_create_project'].should == user.can_create_project?
-      json_response['can_create_group'].should == user.can_create_group?
+    let(:personal_access_token) { create(:personal_access_token, user: user).token }
+
+    context 'with regular user' do
+      context 'with personal access token' do
+        it 'returns 403 without private token when sudo is defined' do
+          get api("/user?private_token=#{personal_access_token}&sudo=123")
+
+          expect(response).to have_http_status(403)
+        end
+      end
+
+      context 'with private token' do
+        it 'returns 403 without private token when sudo defined' do
+          get api("/user?private_token=#{user.private_token}&sudo=123")
+
+          expect(response).to have_http_status(403)
+        end
+      end
+
+      it 'returns current user without private token when sudo not defined' do
+        get api("/user", user)
+
+        expect(response).to have_http_status(200)
+        expect(response).to match_response_schema('user/public')
+        expect(json_response['id']).to eq(user.id)
+      end
     end
 
-    it "should return 401 error if user is unauthenticated" do
-      get api("/user")
-      response.status.should == 401
+    context 'with admin' do
+      let(:admin_personal_access_token) { create(:personal_access_token, user: admin).token }
+
+      context 'with personal access token' do
+        it 'returns 403 without private token when sudo defined' do
+          get api("/user?private_token=#{admin_personal_access_token}&sudo=#{user.id}")
+
+          expect(response).to have_http_status(403)
+        end
+
+        it 'returns initial current user without private token when sudo not defined' do
+          get api("/user?private_token=#{admin_personal_access_token}")
+
+          expect(response).to have_http_status(200)
+          expect(response).to match_response_schema('user/public')
+          expect(json_response['id']).to eq(admin.id)
+        end
+      end
+
+      context 'with private token' do
+        it 'returns sudoed user with private token when sudo defined' do
+          get api("/user?private_token=#{admin.private_token}&sudo=#{user.id}")
+
+          expect(response).to have_http_status(200)
+          expect(response).to match_response_schema('user/login')
+          expect(json_response['id']).to eq(user.id)
+        end
+
+        it 'returns initial current user without private token when sudo not defined' do
+          get api("/user?private_token=#{admin.private_token}")
+
+          expect(response).to have_http_status(200)
+          expect(response).to match_response_schema('user/public')
+          expect(json_response['id']).to eq(admin.id)
+        end
+      end
+    end
+
+    context 'with unauthenticated user' do
+      it "returns 401 error if user is unauthenticated" do
+        get api("/user")
+
+        expect(response).to have_http_status(401)
+      end
     end
   end
 
   describe "GET /user/keys" do
     context "when unauthenticated" do
-      it "should return authentication error" do
+      it "returns authentication error" do
         get api("/user/keys")
-        response.status.should == 401
+        expect(response).to have_http_status(401)
       end
     end
 
     context "when authenticated" do
-      it "should return array of ssh keys" do
+      it "returns array of ssh keys" do
         user.keys << key
         user.save
+
         get api("/user/keys", user)
-        response.status.should == 200
-        json_response.should be_an Array
-        json_response.first["title"].should == key.title
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first["title"]).to eq(key.title)
       end
     end
   end
 
-  describe "GET /user/keys/:id" do
-    it "should return single key" do
+  describe "GET /user/keys/:key_id" do
+    it "returns single key" do
       user.keys << key
       user.save
       get api("/user/keys/#{key.id}", user)
-      response.status.should == 200
-      json_response["title"].should == key.title
+      expect(response).to have_http_status(200)
+      expect(json_response["title"]).to eq(key.title)
     end
 
-    it "should return 404 Not Found within invalid ID" do
+    it "returns 404 Not Found within invalid ID" do
       get api("/user/keys/42", user)
-      response.status.should == 404
+
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Key Not Found')
     end
 
-    it "should return 404 error if admin accesses user's ssh key" do
+    it "returns 404 error if admin accesses user's ssh key" do
       user.keys << key
       user.save
       admin
       get api("/user/keys/#{key.id}", admin)
-      response.status.should == 404
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Key Not Found')
+    end
+
+    it "returns 404 for invalid ID" do
+      get api("/users/keys/ASDF", admin)
+
+      expect(response).to have_http_status(404)
     end
   end
 
   describe "POST /user/keys" do
-    it "should create ssh key" do
+    it "creates ssh key" do
       key_attrs = attributes_for :key
-      expect {
+      expect do
         post api("/user/keys", user), key_attrs
-      }.to change{ user.keys.count }.by(1)
-      response.status.should == 201
+      end.to change{ user.keys.count }.by(1)
+      expect(response).to have_http_status(201)
     end
 
-    it "should return a 401 error if unauthorized" do
+    it "returns a 401 error if unauthorized" do
       post api("/user/keys"), title: 'some title', key: 'some key'
-      response.status.should == 401
+      expect(response).to have_http_status(401)
     end
 
-    it "should not create ssh key without key" do
+    it "does not create ssh key without key" do
       post api("/user/keys", user), title: 'title'
-      response.status.should == 400
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('key is missing')
     end
 
-    it "should not create ssh key without title" do
+    it 'does not create ssh key without title' do
+      post api('/user/keys', user), key: 'some key'
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('title is missing')
+    end
+
+    it "does not create ssh key without title" do
       post api("/user/keys", user), key: "somekey"
-      response.status.should == 400
+      expect(response).to have_http_status(400)
     end
   end
 
-  describe "DELETE /user/keys/:id" do
-    it "should delete existed key" do
+  describe "DELETE /user/keys/:key_id" do
+    it "deletes existed key" do
       user.keys << key
       user.save
-      expect {
+      expect do
         delete api("/user/keys/#{key.id}", user)
-      }.to change{user.keys.count}.by(-1)
-      response.status.should == 200
+      end.to change{user.keys.count}.by(-1)
+      expect(response).to have_http_status(200)
     end
 
-    it "should return success if key ID not found" do
+    it "returns 404 if key ID not found" do
       delete api("/user/keys/42", user)
-      response.status.should == 200
+
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Key Not Found')
     end
 
-    it "should return 401 error if unauthorized" do
+    it "returns 401 error if unauthorized" do
       user.keys << key
       user.save
       delete api("/user/keys/#{key.id}")
-      response.status.should == 401
+      expect(response).to have_http_status(401)
+    end
+
+    it "returns a 404 for invalid ID" do
+      delete api("/users/keys/ASDF", admin)
+
+      expect(response).to have_http_status(404)
+    end
+  end
+
+  describe "GET /user/emails" do
+    context "when unauthenticated" do
+      it "returns authentication error" do
+        get api("/user/emails")
+        expect(response).to have_http_status(401)
+      end
+    end
+
+    context "when authenticated" do
+      it "returns array of emails" do
+        user.emails << email
+        user.save
+
+        get api("/user/emails", user)
+
+        expect(response).to have_http_status(200)
+        expect(response).to include_pagination_headers
+        expect(json_response).to be_an Array
+        expect(json_response.first["email"]).to eq(email.email)
+      end
+    end
+  end
+
+  describe "GET /user/emails/:email_id" do
+    it "returns single email" do
+      user.emails << email
+      user.save
+      get api("/user/emails/#{email.id}", user)
+      expect(response).to have_http_status(200)
+      expect(json_response["email"]).to eq(email.email)
+    end
+
+    it "returns 404 Not Found within invalid ID" do
+      get api("/user/emails/42", user)
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Email Not Found')
+    end
+
+    it "returns 404 error if admin accesses user's email" do
+      user.emails << email
+      user.save
+      admin
+      get api("/user/emails/#{email.id}", admin)
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Email Not Found')
+    end
+
+    it "returns 404 for invalid ID" do
+      get api("/users/emails/ASDF", admin)
+
+      expect(response).to have_http_status(404)
+    end
+  end
+
+  describe "POST /user/emails" do
+    it "creates email" do
+      email_attrs = attributes_for :email
+      expect do
+        post api("/user/emails", user), email_attrs
+      end.to change{ user.emails.count }.by(1)
+      expect(response).to have_http_status(201)
+    end
+
+    it "returns a 401 error if unauthorized" do
+      post api("/user/emails"), email: 'some email'
+      expect(response).to have_http_status(401)
+    end
+
+    it "does not create email with invalid email" do
+      post api("/user/emails", user), {}
+
+      expect(response).to have_http_status(400)
+      expect(json_response['error']).to eq('email is missing')
+    end
+  end
+
+  describe "DELETE /user/emails/:email_id" do
+    it "deletes existed email" do
+      user.emails << email
+      user.save
+      expect do
+        delete api("/user/emails/#{email.id}", user)
+      end.to change{user.emails.count}.by(-1)
+      expect(response).to have_http_status(200)
+    end
+
+    it "returns 404 if email ID not found" do
+      delete api("/user/emails/42", user)
+
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 Email Not Found')
+    end
+
+    it "returns 401 error if unauthorized" do
+      user.emails << email
+      user.save
+      delete api("/user/emails/#{email.id}")
+      expect(response).to have_http_status(401)
+    end
+
+    it "returns 400 for invalid ID" do
+      delete api("/user/emails/ASDF", admin)
+
+      expect(response).to have_http_status(400)
+    end
+  end
+
+  describe 'POST /users/:id/block' do
+    before { admin }
+    it 'blocks existing user' do
+      post api("/users/#{user.id}/block", admin)
+      expect(response).to have_http_status(201)
+      expect(user.reload.state).to eq('blocked')
+    end
+
+    it 'does not re-block ldap blocked users' do
+      post api("/users/#{ldap_blocked_user.id}/block", admin)
+      expect(response).to have_http_status(403)
+      expect(ldap_blocked_user.reload.state).to eq('ldap_blocked')
+    end
+
+    it 'does not be available for non admin users' do
+      post api("/users/#{user.id}/block", user)
+      expect(response).to have_http_status(403)
+      expect(user.reload.state).to eq('active')
+    end
+
+    it 'returns a 404 error if user id not found' do
+      post api('/users/9999/block', admin)
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
+    end
+  end
+
+  describe 'POST /users/:id/unblock' do
+    let(:blocked_user)  { create(:user, state: 'blocked') }
+    before { admin }
+
+    it 'unblocks existing user' do
+      post api("/users/#{user.id}/unblock", admin)
+      expect(response).to have_http_status(201)
+      expect(user.reload.state).to eq('active')
+    end
+
+    it 'unblocks a blocked user' do
+      post api("/users/#{blocked_user.id}/unblock", admin)
+      expect(response).to have_http_status(201)
+      expect(blocked_user.reload.state).to eq('active')
+    end
+
+    it 'does not unblock ldap blocked users' do
+      post api("/users/#{ldap_blocked_user.id}/unblock", admin)
+      expect(response).to have_http_status(403)
+      expect(ldap_blocked_user.reload.state).to eq('ldap_blocked')
+    end
+
+    it 'does not be available for non admin users' do
+      post api("/users/#{user.id}/unblock", user)
+      expect(response).to have_http_status(403)
+      expect(user.reload.state).to eq('active')
+    end
+
+    it 'returns a 404 error if user id not found' do
+      post api('/users/9999/block', admin)
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
+    end
+
+    it "returns a 404 for invalid ID" do
+      post api("/users/ASDF/block", admin)
+
+      expect(response).to have_http_status(404)
+    end
+  end
+
+  describe 'GET /users/:id/events' do
+    let(:user) { create(:user) }
+    let(:project) { create(:empty_project) }
+    let(:note) { create(:note_on_issue, note: 'What an awesome day!', project: project) }
+
+    before do
+      project.add_user(user, :developer)
+      EventCreateService.new.leave_note(note, user)
+    end
+
+    context "as a user than cannot see the event's project" do
+      it 'returns no events' do
+        other_user = create(:user)
+
+        get api("/users/#{user.id}/events", other_user)
+
+        expect(response).to have_http_status(200)
+        expect(json_response).to be_empty
+      end
+    end
+
+    context "as a user than can see the event's project" do
+      context 'joined event' do
+        it 'returns the "joined" event' do
+          get api("/users/#{user.id}/events", user)
+
+          expect(response).to have_http_status(200)
+          expect(response).to include_pagination_headers
+          expect(json_response).to be_an Array
+
+          comment_event = json_response.find { |e| e['action_name'] == 'commented on' }
+
+          expect(comment_event['project_id'].to_i).to eq(project.id)
+          expect(comment_event['author_username']).to eq(user.username)
+          expect(comment_event['note']['id']).to eq(note.id)
+          expect(comment_event['note']['body']).to eq('What an awesome day!')
+
+          joined_event = json_response.find { |e| e['action_name'] == 'joined' }
+
+          expect(joined_event['project_id'].to_i).to eq(project.id)
+          expect(joined_event['author_username']).to eq(user.username)
+          expect(joined_event['author']['name']).to eq(user.name)
+        end
+      end
+
+      context 'when there are multiple events from different projects' do
+        let(:second_note) { create(:note_on_issue, project: create(:empty_project)) }
+        let(:third_note) { create(:note_on_issue, project: project) }
+
+        before do
+          second_note.project.add_user(user, :developer)
+
+          [second_note, third_note].each do |note|
+            EventCreateService.new.leave_note(note, user)
+          end
+        end
+
+        it 'returns events in the correct order (from newest to oldest)' do
+          get api("/users/#{user.id}/events", user)
+
+          comment_events = json_response.select { |e| e['action_name'] == 'commented on' }
+
+          expect(comment_events[0]['target_id']).to eq(third_note.id)
+          expect(comment_events[1]['target_id']).to eq(second_note.id)
+          expect(comment_events[2]['target_id']).to eq(note.id)
+        end
+      end
+    end
+
+    it 'returns a 404 error if not found' do
+      get api('/users/42/events', user)
+
+      expect(response).to have_http_status(404)
+      expect(json_response['message']).to eq('404 User Not Found')
     end
   end
 end

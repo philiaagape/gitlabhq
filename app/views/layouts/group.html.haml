@@ -1,12 +1,6 @@
-!!! 5
-%html{ lang: "en"}
-  = render "layouts/head", title: group_head_title
-  %body{class: "#{app_theme} application", :'data-page' => body_data_page}
-    = render "layouts/broadcast"
-    = render "layouts/head_panel", title: "group: #{@group.name}"
-    = render "layouts/flash"
-    %nav.main-nav.navbar-collapse.collapse
-      .container= render 'layouts/nav/group'
+- page_title       @group.name
+- page_description @group.description  unless page_description
+- header_title     group_title(@group) unless header_title
+- nav              "group"
 
-    .container
-      .content= yield
+= render template: "layouts/application"

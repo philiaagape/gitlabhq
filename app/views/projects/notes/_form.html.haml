@@ -1,41 +1,28 @@
-= form_for [@project, @note], remote: true, html: { :'data-type' => 'json', multipart: true, id: nil, class: "new_note js-new-note-form common-note-form" }, authenticity_token: true do |f|
-  = note_target_fields
+- supports_slash_commands = note_supports_slash_commands?(@note)
+
+= form_for [@project.namespace.becomes(Namespace), @project, @note], remote: true, html: { :'data-type' => 'json', multipart: true, id: nil, class: "new-note js-new-note-form js-quick-submit common-note-form", "data-noteable-iid" => @note.noteable.try(:iid), }, authenticity_token: true do |f|
+  = hidden_field_tag :view, diff_view
+  = hidden_field_tag :line_type
+  = hidden_field_tag :merge_request_diff_head_sha, @note.noteable.try(:diff_head_sha)
+  = note_target_fields(@note)
   = f.hidden_field :commit_id
   = f.hidden_field :line_code
   = f.hidden_field :noteable_id
   = f.hidden_field :noteable_type
+  = f.hidden_field :type
+  = f.hidden_field :position
 
-  %ul.nav.nav-tabs
-    %li.active
-      = link_to '#note-write-holder', class: 'js-note-write-button' do
-        Write
-    %li
-      = link_to '#note-preview-holder', class: 'js-note-preview-button', data: { url: preview_project_notes_path(@project) } do
-        Preview
-  %div
-    .note-write-holder
-      = f.text_area :note, size: 255, class: 'note_text js-note-text js-gfm-input markdown-area'
+  = render layout: 'projects/md_preview', locals: { preview_class: "md-preview", referenced_users: true } do
+    = render 'projects/zen', f: f,
+      attr: :note,
+      classes: 'note-textarea js-note-text',
+      placeholder: "Write a comment or drag your files here...",
+      supports_slash_commands: supports_slash_commands
+    = render 'projects/notes/hints', supports_slash_commands: supports_slash_commands
+    .error-alert
 
-      .light.clearfix
-        .pull-left Comments are parsed with #{link_to "GitLab Flavored Markdown", help_page_path("markdown", "markdown"),{ target: '_blank', tabindex: -1 }}
-        .pull-right Attach images (JPG, PNG, GIF) by dragging &amp; dropping or #{link_to "selecting them", '#', class: 'markdown-selector', tabindex: -1 }.
-
-    .note-preview-holder.hide
-      .js-note-preview
-
-  .note-form-actions
-    .buttons
-      = f.submit 'Add Comment', class: "btn comment-btn btn-grouped js-comment-button"
-      = yield(:note_actions)
-      %a.btn.grouped.js-close-discussion-note-form Cancel
-
-    .note-form-option
-      %a.choose-btn.btn.js-choose-note-attachment-button
-        %i.icon-paper-clip
-        %span Choose File ...
-      &nbsp;
-      %span.file_name.js-attachment-filename File name...
-      = f.file_field :attachment, class: "js-note-attachment-input hidden"
-
-:javascript
-  window.project_image_path_upload = "#{upload_image_project_path @project}";
+  .note-form-actions.clearfix
+    = f.submit 'Comment', class: "btn btn-nr btn-create append-right-10 comment-btn js-comment-button"
+    = yield(:note_actions)
+    %a.btn.btn-cancel.js-note-discard{ role: "button", data: {cancel_text: "Cancel" } }
+      Discard draft

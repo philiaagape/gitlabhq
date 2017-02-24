@@ -1,23 +1,54 @@
 module Notes
   class CreateService < BaseService
     def execute
-      note = project.notes.new(params)
-      note.author = current_user
-      note.system = false
+      merge_request_diff_head_sha = params.delete(:merge_request_diff_head_sha)
 
-      if note.save
-        notification_service.new_note(note)
+      note = Note.new(params)
+      note.project = project
+      note.author  = current_user
+      note.system  = false
 
-        # Skip system notes, like status changes and cross-references.
-        unless note.system
-          event_service.leave_note(note, note.author)
-
-          # Create a cross-reference note if this Note contains GFM that names an
-          # issue, merge request, or commit.
-          note.references.each do |mentioned|
-            Note.create_cross_reference_note(mentioned, note.noteable, note.author, note.project)
-          end
+      if note.award_emoji?
+        noteable = note.noteable
+        if noteable.user_can_award?(current_user, note.award_emoji_name)
+          todo_service.new_award_emoji(noteable, current_user)
+          return noteable.create_award_emoji(note.award_emoji_name, current_user)
         end
+      end
+
+      # We execute commands (extracted from `params[:note]`) on the noteable
+      # **before** we save the note because if the note consists of commands
+      # only, there is no need be create a note!
+      slash_commands_service = SlashCommandsService.new(project, current_user)
+
+      if slash_commands_service.supported?(note)
+        options = { merge_request_diff_head_sha: merge_request_diff_head_sha }
+        content, command_params = slash_commands_service.extract_commands(note, options)
+
+        only_commands = content.empty?
+
+        note.note = content
+      end
+
+      note.run_after_commit do
+        # Finish the harder work in the background
+        NewNoteWorker.perform_async(note.id)
+      end
+
+      if !only_commands && note.save
+        todo_service.new_note(note, current_user)
+      end
+
+      if command_params.present?
+        slash_commands_service.execute(command_params, note)
+
+        # We must add the error after we call #save because errors are reset
+        # when #save is called
+        if only_commands
+          note.errors.add(:commands_only, 'Commands applied')
+        end
+
+        note.commands_changes = command_params.keys
       end
 
       note

@@ -1,125 +1,114 @@
-class GroupsController < ApplicationController
-  skip_before_filter :authenticate_user!, only: [:show, :issues, :members, :merge_requests]
+class GroupsController < Groups::ApplicationController
+  include FilterProjects
+  include IssuesAction
+  include MergeRequestsAction
+
   respond_to :html
-  before_filter :group, except: [:new, :create]
+
+  before_action :authenticate_user!, only: [:new, :create]
+  before_action :group, except: [:index, :new, :create]
 
   # Authorize
-  before_filter :authorize_read_group!, except: [:new, :create]
-  before_filter :authorize_admin_group!, only: [:edit, :update, :destroy, :projects]
-  before_filter :authorize_create_group!, only: [:new, :create]
+  before_action :authorize_admin_group!, only: [:edit, :update, :destroy, :projects]
+  before_action :authorize_create_group!, only: [:new, :create]
 
   # Load group projects
-  before_filter :load_projects, except: [:new, :create, :projects, :edit, :update]
+  before_action :group_projects, only: [:projects, :activity, :issues, :merge_requests]
+  before_action :event_filter, only: [:activity]
 
-  before_filter :default_filter, only: [:issues, :merge_requests]
+  before_action :user_actions, only: [:show, :subgroups]
 
   layout :determine_layout
 
-  before_filter :set_title, only: [:new, :create]
+  def index
+    redirect_to(current_user ? dashboard_groups_path : explore_groups_path)
+  end
 
   def new
     @group = Group.new
   end
 
   def create
-    @group = Group.new(group_params)
-    @group.path = @group.name.dup.parameterize if @group.name
+    @group = Groups::CreateService.new(current_user, group_params).execute
 
-    if @group.save
-      @group.add_owner(current_user)
-      redirect_to @group, notice: 'Group was successfully created.'
+    if @group.persisted?
+      redirect_to @group, notice: "Group '#{@group.name}' was successfully created."
     else
       render action: "new"
     end
   end
 
   def show
-    @events = Event.in_projects(project_ids)
-    @events = event_filter.apply_filter(@events)
-    @events = @events.limit(20).offset(params[:offset] || 0)
-    @last_push = current_user.recent_push if current_user
+    setup_projects
 
     respond_to do |format|
       format.html
-      format.json { pager_json("events/_events", @events.count) }
-      format.atom { render layout: false }
+
+      format.json do
+        render json: {
+          html: view_to_html_string("dashboard/projects/_projects", locals: { projects: @projects })
+        }
+      end
+
+      format.atom do
+        load_events
+        render layout: false
+      end
     end
   end
 
-  def merge_requests
-    @merge_requests = MergeRequestsFinder.new.execute(current_user, params)
-    @merge_requests = @merge_requests.page(params[:page]).per(20)
-    @merge_requests = @merge_requests.preload(:author, :target_project)
+  def subgroups
+    @nested_groups = group.children
+    @nested_groups = @nested_groups.search(params[:filter_groups]) if params[:filter_groups].present?
   end
 
-  def issues
-    @issues = IssuesFinder.new.execute(current_user, params)
-    @issues = @issues.page(params[:page]).per(20)
-    @issues = @issues.preload(:author, :project)
-
+  def activity
     respond_to do |format|
       format.html
-      format.atom { render layout: false }
+
+      format.json do
+        load_events
+        pager_json("events/_events", @events.count)
+      end
     end
-  end
-
-  def members
-    @project = group.projects.find(params[:project_id]) if params[:project_id]
-    @members = group.users_groups
-
-    if params[:search].present?
-      users = group.users.search(params[:search]).to_a
-      @members = @members.where(user_id: users)
-    end
-
-    @members = @members.order('group_access DESC').page(params[:page]).per(50)
-    @users_group = UsersGroup.new
   end
 
   def edit
   end
 
   def projects
-    @projects = @group.projects.page(params[:page])
+    @projects = @group.projects.with_statistics.page(params[:page])
   end
 
   def update
-    if @group.update_attributes(group_params)
-      redirect_to edit_group_path(@group), notice: 'Group was successfully updated.'
+    if Groups::UpdateService.new(@group, current_user, group_params).execute
+      redirect_to edit_group_path(@group), notice: "Group '#{@group.name}' was successfully updated."
     else
+      @group.restore_path!
+
       render action: "edit"
     end
   end
 
   def destroy
-    @group.destroy
+    Groups::DestroyService.new(@group, current_user).async_execute
 
-    redirect_to root_path, notice: 'Group was removed.'
+    redirect_to root_path, alert: "Group '#{@group.name}' was scheduled for deletion."
   end
 
   protected
 
-  def group
-    @group ||= Group.find_by(path: params[:id])
-  end
+  def setup_projects
+    options = {}
+    options[:only_owned] = true if params[:shared] == '0'
+    options[:only_shared] = true if params[:shared] == '1'
 
-  def load_projects
-    @projects ||= ProjectsFinder.new.execute(current_user, group: group).sorted_by_activity.non_archived
-  end
-
-  def project_ids
-    @projects.pluck(:id)
-  end
-
-  # Dont allow unauthorized access to group
-  def authorize_read_group!
-    unless @group and (@projects.present? or can?(current_user, :read_group, @group))
-      if current_user.nil?
-        return authenticate_user!
-      else
-        return render_404
-      end
-    end
+    @projects = GroupProjectsFinder.new(group, options).execute(current_user)
+    @projects = @projects.includes(:namespace)
+    @projects = @projects.sorted_by_activity
+    @projects = filter_projects(@projects)
+    @projects = @projects.sort(@sort = params[:sort])
+    @projects = @projects.page(params[:page]) if params[:filter_projects].blank?
   end
 
   def authorize_create_group!
@@ -128,39 +117,45 @@ class GroupsController < ApplicationController
     end
   end
 
-  def authorize_admin_group!
-    unless can?(current_user, :manage_group, group)
-      return render_404
-    end
-  end
-
-  def set_title
-    @title = 'New Group'
-  end
-
   def determine_layout
     if [:new, :create].include?(action_name.to_sym)
-      'navless'
-    elsif current_user
-      'group'
+      'application'
+    elsif [:edit, :update, :projects].include?(action_name.to_sym)
+      'group_settings'
     else
-      'public_group'
+      'group'
     end
-  end
-
-  def default_filter
-    if params[:scope].blank?
-      if current_user
-        params[:scope] = 'assigned-to-me'
-      else
-        params[:scope] = 'all'
-      end
-    end
-    params[:state] = 'opened' if params[:state].blank?
-    params[:group_id] = @group.id
   end
 
   def group_params
-    params.require(:group).permit(:name, :description, :path, :avatar)
+    params.require(:group).permit(group_params_ce)
+  end
+
+  def group_params_ce
+    [
+      :avatar,
+      :description,
+      :lfs_enabled,
+      :name,
+      :path,
+      :public,
+      :request_access_enabled,
+      :share_with_group_lock,
+      :visibility_level,
+      :parent_id
+    ]
+  end
+
+  def load_events
+    @events = Event.in_projects(@projects)
+    @events = event_filter.apply_filter(@events).with_associations
+    @events = @events.limit(20).offset(params[:offset] || 0)
+  end
+
+  def user_actions
+    if current_user
+      @last_push = current_user.recent_push
+      @notification_setting = current_user.notification_settings_for(group)
+    end
   end
 end

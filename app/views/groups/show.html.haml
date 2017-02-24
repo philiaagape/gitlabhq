@@ -1,37 +1,21 @@
-.dashboard
-  %section.activities.col-md-8.hidden-sm.hidden-xs
-    - if current_user
-      = render "events/event_last_push", event: @last_push
-      = link_to dashboard_path, class: 'btn btn-tiny' do
-        &larr; To dashboard
-      &nbsp;
-    %span.cgray
-      Currently you are only seeing events from the
-      = @group.name
-      group
-    %hr
-    = render 'shared/event_filter'
-    - if @events.any?
-      .content_list
-    - else
-      .nothing-here-block Project activity will be displayed here
-    = spinner
-  %aside.side.col-md-4
-    .light-well.append-bottom-20
-      = image_tag group_icon(@group.path), class: "avatar s90"
-      .clearfix.light
-        %h3.page-title
-          = @group.name
-        - if @group.description.present?
-          %p
-            = auto_link @group.description, link: :urls
-    = render "projects", projects: @projects
-    - if current_user
-      .prepend-top-20
-        = link_to group_path(@group, { format: :atom, private_token: current_user.private_token }), title: "Feed" do
-          %strong
-            %i.icon-rss
-            News Feed
+- @no_container = true
 
-    %hr
-    = render 'shared/promo'
+= content_for :meta_tags do
+  - if current_user
+    = auto_discovery_link_tag(:atom, group_url(@group, format: :atom, private_token: current_user.private_token), title: "#{@group.name} activity")
+
+= render 'groups/home_panel'
+
+
+.groups-header{ class: container_class }
+  .top-area
+    = render 'groups/show_nav'
+    .nav-controls
+      = form_tag request.path, method: :get, class: 'project-filter-form', id: 'project-filter-form' do |f|
+        = search_field_tag :filter_projects, nil, placeholder: 'Filter by name', class: 'projects-list-filter form-control', spellcheck: false
+      = render 'shared/projects/dropdown'
+      - if can? current_user, :create_projects, @group
+        = link_to new_project_path(namespace_id: @group.id), class: 'btn btn-new pull-right' do
+          New Project
+
+  = render "projects", projects: @projects

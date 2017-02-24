@@ -1,38 +1,45 @@
-# == Schema Information
-#
-# Table name: keys
-#
-#  id          :integer          not null, primary key
-#  user_id     :integer
-#  created_at  :datetime
-#  updated_at  :datetime
-#  key         :text
-#  title       :string(255)
-#  type        :string(255)
-#  fingerprint :string(255)
-#
-
 require 'digest/md5'
 
 class Key < ActiveRecord::Base
-  include Gitlab::Popen
+  include AfterCommitQueue
+  include Sortable
+
+  LAST_USED_AT_REFRESH_TIME = 1.day.to_i
 
   belongs_to :user
 
-  before_validation :strip_white_space, :generate_fingerpint
+  before_validation :generate_fingerprint
 
-  validates :title, presence: true, length: { within: 0..255 }
-  validates :key, presence: true, length: { within: 0..5000 }, format: { with: /\A(ssh|ecdsa)-.*\Z/ }, uniqueness: true
-  validates :fingerprint, uniqueness: true, presence: { message: 'cannot be generated' }
+  validates :title,
+    presence: true,
+    length: { maximum: 255 }
+  validates :key,
+    presence: true,
+    length: { maximum: 5000 },
+    format: { with: /\A(ssh|ecdsa)-.*\Z/ }
+  validates :key,
+    format: { without: /\n|\r/, message: 'should be a single line' }
+  validates :fingerprint,
+    uniqueness: true,
+    presence: { message: 'cannot be generated' }
 
   delegate :name, :email, to: :user, prefix: true
 
   after_create :add_to_shell
   after_create :notify_user
+  after_create :post_create_hook
   after_destroy :remove_from_shell
+  after_destroy :post_destroy_hook
 
-  def strip_white_space
-    self.key = key.strip unless key.blank?
+  def key=(value)
+    value.strip! unless value.blank?
+    write_attribute(:key, value)
+  end
+
+  def publishable_key
+    # Strip out the keys comment so we don't leak email addresses
+    # Replace with simple ident of user_name (hostname)
+    self.key.split[0..1].push("#{self.user_name} (#{Gitlab.config.gitlab.host})").join(' ')
   end
 
   # projects that has this key
@@ -44,6 +51,13 @@ class Key < ActiveRecord::Base
     "key-#{id}"
   end
 
+  def update_last_used_at
+    lease = Gitlab::ExclusiveLease.new("key_update_last_used_at:#{id}", timeout: LAST_USED_AT_REFRESH_TIME)
+    return unless lease.try_obtain
+
+    UseKeyWorker.perform_async(id)
+  end
+
   def add_to_shell
     GitlabShellWorker.perform_async(
       :add_key,
@@ -52,8 +66,8 @@ class Key < ActiveRecord::Base
     )
   end
 
-  def notify_user
-    NotificationService.new.new_key(self)
+  def post_create_hook
+    SystemHooksService.new.execute_hooks_for(self, :create)
   end
 
   def remove_from_shell
@@ -64,24 +78,21 @@ class Key < ActiveRecord::Base
     )
   end
 
+  def post_destroy_hook
+    SystemHooksService.new.execute_hooks_for(self, :destroy)
+  end
+
   private
 
-  def generate_fingerpint
+  def generate_fingerprint
     self.fingerprint = nil
-    return unless key.present?
 
-    cmd_status = 0
-    cmd_output = ''
-    Tempfile.open('gitlab_key_file') do |file|
-      file.puts key
-      file.rewind
-      cmd_output, cmd_status = popen(%W(ssh-keygen -lf #{file.path}), '/tmp')
-    end
+    return unless self.key.present?
 
-    if cmd_status.zero?
-      cmd_output.gsub /([\d\h]{2}:)+[\d\h]{2}/ do |match|
-        self.fingerprint = match
-      end
-    end
+    self.fingerprint = Gitlab::KeyFingerprint.new(self.key).fingerprint
+  end
+
+  def notify_user
+    run_after_commit { NotificationService.new.new_key(self) }
   end
 end

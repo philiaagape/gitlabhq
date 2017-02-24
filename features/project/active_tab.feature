@@ -1,4 +1,4 @@
-Feature: Project active tab
+Feature: Project Active Tab
   Background:
     Given I sign in as a user
     And I own a project
@@ -10,19 +10,9 @@ Feature: Project active tab
     Then the active main tab should be Home
     And no other main tabs should be active
 
-  Scenario: On Project Files
+  Scenario: On Project Repository
     Given I visit my project's files page
-    Then the active main tab should be Files
-    And no other main tabs should be active
-
-  Scenario: On Project Commits
-    Given I visit my project's commits page
-    Then the active main tab should be Commits
-    And no other main tabs should be active
-
-  Scenario: On Project Network
-    Given I visit my project's network page
-    Then the active main tab should be Network
+    Then the active main tab should be Repository
     And no other main tabs should be active
 
   Scenario: On Project Issues
@@ -49,24 +39,10 @@ Feature: Project active tab
 
   # Sub Tabs: Settings
 
-  Scenario: On Project Settings/Team
+  Scenario: On Project Settings/Integrations
     Given I visit my project's settings page
-    And I click the "Team" tab
-    Then the active sub nav should be Team
-    And no other sub navs should be active
-    And the active main tab should be Settings
-
-  Scenario: On Project Settings/Edit
-    Given I visit my project's settings page
-    And I click the "Edit" tab
-    Then the active sub nav should be Edit
-    And no other sub navs should be active
-    And the active main tab should be Settings
-
-  Scenario: On Project Settings/Hooks
-    Given I visit my project's settings page
-    And I click the "Hooks" tab
-    Then the active sub nav should be Hooks
+    And I click the "Integrations" tab
+    Then the active sub nav should be Integrations
     And no other sub navs should be active
     And the active main tab should be Settings
 
@@ -77,53 +53,77 @@ Feature: Project active tab
     And no other sub navs should be active
     And the active main tab should be Settings
 
-  # Sub Tabs: Commits
+  Scenario: On Project Settings/Pages
+    Given I visit my project's settings page
+    And I click the "Pages" tab
+    Then the active sub nav should be Pages
+    And no other sub navs should be active
+    And the active main tab should be Settings
 
-  Scenario: On Project Commits/Commits
+  Scenario: On Project Members
+    Given I visit my project's members page
+    Then the active sub nav should be Members
+    And no other sub navs should be active
+    And the active main tab should be Settings
+
+  # Sub Tabs: Repository
+
+  Scenario: On Project Repository/Files
+    Given I visit my project's files page
+    Then the active sub tab should be Files
+    And no other sub tabs should be active
+    And the active main tab should be Repository
+
+  Scenario: On Project Repository/Commits
     Given I visit my project's commits page
     Then the active sub tab should be Commits
     And no other sub tabs should be active
-    And the active main tab should be Commits
+    And the active main tab should be Repository
 
-  Scenario: On Project Commits/Compare
+  Scenario: On Project Repository/Network
+    Given I visit my project's network page
+    Then the active sub tab should be Network
+    And no other sub tabs should be active
+    And the active main tab should be Repository
+
+  Scenario: On Project Repository/Compare
     Given I visit my project's commits page
     And I click the "Compare" tab
     Then the active sub tab should be Compare
     And no other sub tabs should be active
-    And the active main tab should be Commits
+    And the active main tab should be Repository
 
-  Scenario: On Project Commits/Branches
+  Scenario: On Project Repository/Branches
     Given I visit my project's commits page
     And I click the "Branches" tab
     Then the active sub tab should be Branches
     And no other sub tabs should be active
-    And the active main tab should be Commits
+    And the active main tab should be Repository
 
-  Scenario: On Project Commits/Tags
+  Scenario: On Project Repository/Tags
     Given I visit my project's commits page
     And I click the "Tags" tab
     Then the active sub tab should be Tags
     And no other sub tabs should be active
-    And the active main tab should be Commits
-
-  # Sub Tabs: Issues
+    And the active main tab should be Repository
 
   Scenario: On Project Issues/Browse
     Given I visit my project's issues page
-    Then the active sub tab should be Browse Issues
-    And no other sub tabs should be active
-    And the active main tab should be Issues
+    Then the active main tab should be Issues
+    And no other main tabs should be active
 
   Scenario: On Project Issues/Milestones
     Given I visit my project's issues page
-    And I click the "Milestones" tab
+    And I click the "Milestones" sub tab
+    Then the active main tab should be Issues
     Then the active sub tab should be Milestones
+    And no other main tabs should be active
     And no other sub tabs should be active
-    And the active main tab should be Issues
 
   Scenario: On Project Issues/Labels
     Given I visit my project's issues page
-    And I click the "Labels" tab
+    And I click the "Labels" sub tab
+    Then the active main tab should be Issues
     Then the active sub tab should be Labels
+    And no other main tabs should be active
     And no other sub tabs should be active
-    And the active main tab should be Issues

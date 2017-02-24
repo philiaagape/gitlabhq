@@ -1,4 +1,5 @@
-Feature: Project Labels
+@project_issues
+Feature: Project Issues Labels
   Background:
     Given I sign in as a user
     And I own project "Shop"
@@ -6,11 +7,11 @@ Feature: Project Labels
     Given I visit project "Shop" labels page
 
   Scenario: I should see labels list
-    Then I should see label "bug"
-    And I should see label "feature"
+    Then I should see label 'bug'
+    And I should see label 'feature'
 
   Scenario: I create new label
-    Given I visit new label page
+    Given I visit project "Shop" new label page
     When I submit new label 'support'
     Then I should see label 'support'
 
@@ -23,3 +24,25 @@ Feature: Project Labels
   Scenario: I remove label
     When I remove label 'bug'
     Then I should not see label 'bug'
+
+  @javascript
+  Scenario: I remove all labels
+    When I delete all labels
+    Then I should see labels help message
+
+  Scenario: I create a label with invalid color
+    Given I visit project "Shop" new label page
+    When I submit new label with invalid color
+    Then I should see label color error message
+
+  Scenario: I create a label that already exists
+    Given I visit project "Shop" new label page
+    When I submit new label 'bug'
+    Then I should see label label exist error message
+
+  Scenario: I create the same label on another project
+    Given I own project "Forum"
+    And I visit project "Forum" labels page
+    And I visit project "Forum" new label page
+    When I submit new label 'bug'
+    Then I should see label 'bug'

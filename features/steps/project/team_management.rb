@@ -1,96 +1,122 @@
-class ProjectTeamManagement < Spinach::FeatureSteps
+class Spinach::Features::ProjectTeamManagement < Spinach::FeatureSteps
   include SharedAuthentication
   include SharedProject
   include SharedPaths
   include Select2Helper
 
-  Then 'I should be able to see myself in team' do
-    page.should have_content(@user.name)
-    page.should have_content(@user.username)
+  step 'I should be able to see myself in team' do
+    expect(page).to have_content(@user.name)
+    expect(page).to have_content(@user.username)
   end
 
-  And 'I should see "Sam" in team list' do
-    user = User.find_by(name: "Sam")
-    page.should have_content(user.name)
-    page.should have_content(user.username)
+  step 'I should see "Dmitriy" in team list' do
+    user = User.find_by(name: "Dmitriy")
+    expect(page).to have_content(user.name)
+    expect(page).to have_content(user.username)
   end
 
-  Given 'I click link "New Team Member"' do
-    click_link "New project member"
-  end
-
-  And 'I select "Mike" as "Reporter"' do
+  step 'I select "Mike" as "Reporter"' do
     user = User.find_by(name: "Mike")
 
-    select2(user.id, from: "#user_ids", multiple: true)
-    within "#new_team_member" do
-      select "Reporter", from: "project_access"
+    page.within ".users-project-form" do
+      select2(user.id, from: "#user_ids", multiple: true)
+      select "Reporter", from: "access_level"
     end
-    click_button "Add users"
+    click_button "Add to project"
   end
 
-  Then 'I should see "Mike" in team list as "Reporter"' do
-    within ".access-reporter" do
-      page.should have_content('Mike')
-    end
-  end
-
-  Given 'I should see "Sam" in team list as "Developer"' do
-    within ".access-developer" do
-      page.should have_content('Sam')
+  step 'I should see "Mike" in team list as "Reporter"' do
+    user = User.find_by(name: 'Mike')
+    project_member = project.project_members.find_by(user_id: user.id)
+    page.within "#project_member_#{project_member.id}" do
+      expect(page).to have_content('Mike')
+      expect(page).to have_content('Reporter')
     end
   end
 
-  And 'I change "Sam" role to "Reporter"' do
-    user = User.find_by(name: "Sam")
-    within "#user_#{user.id}" do
-      select "Reporter", from: "team_member_project_access"
+  step 'I select "sjobs@apple.com" as "Reporter"' do
+    page.within ".users-project-form" do
+      find('#user_ids', visible: false).set('sjobs@apple.com')
+      select "Reporter", from: "access_level"
+    end
+    click_button "Add to project"
+  end
+
+  step 'I should see "sjobs@apple.com" in team list as invited "Reporter"' do
+    project_member = project.project_members.find_by(invite_email: 'sjobs@apple.com')
+    page.within "#project_member_#{project_member.id}" do
+      expect(page).to have_content('sjobs@apple.com')
+      expect(page).to have_content('Invited')
+      expect(page).to have_content('Reporter')
     end
   end
 
-  And 'I should see "Sam" in team list as "Reporter"' do
-    within ".access-reporter" do
-      page.should have_content('Sam')
+  step 'I should see "Dmitriy" in team list as "Developer"' do
+    user = User.find_by(name: 'Dmitriy')
+    project_member = project.project_members.find_by(user_id: user.id)
+    page.within "#project_member_#{project_member.id}" do
+      expect(page).to have_content('Dmitriy')
+      expect(page).to have_content('Developer')
     end
   end
 
-  And 'I click link "Remove from team"' do
-    click_link "Remove from team"
+  step 'I change "Dmitriy" role to "Reporter"' do
+    project = Project.find_by(name: "Shop")
+    user = User.find_by(name: 'Dmitriy')
+    project_member = project.project_members.find_by(user_id: user.id)
+    page.within "#project_member_#{project_member.id}" do
+      click_button project_member.human_access
+
+      page.within '.dropdown-menu' do
+        click_link 'Reporter'
+      end
+    end
   end
 
-  And 'I should not see "Sam" in team list' do
-    user = User.find_by(name: "Sam")
-    page.should_not have_content(user.name)
-    page.should_not have_content(user.username)
+  step 'I should see "Dmitriy" in team list as "Reporter"' do
+    user = User.find_by(name: 'Dmitriy')
+    project_member = project.project_members.find_by(user_id: user.id)
+    page.within "#project_member_#{project_member.id}" do
+      expect(page).to have_content('Dmitriy')
+      expect(page).to have_content('Reporter')
+    end
   end
 
-  And 'gitlab user "Mike"' do
+  step 'I should not see "Dmitriy" in team list' do
+    user = User.find_by(name: "Dmitriy")
+    expect(page).not_to have_content(user.name)
+    expect(page).not_to have_content(user.username)
+  end
+
+  step 'gitlab user "Mike"' do
     create(:user, name: "Mike")
   end
 
-  And 'gitlab user "Sam"' do
-    create(:user, name: "Sam")
+  step 'gitlab user "Dmitriy"' do
+    create(:user, name: "Dmitriy")
   end
 
-  And '"Sam" is "Shop" developer' do
-    user = User.find_by(name: "Sam")
+  step '"Dmitriy" is "Shop" developer' do
+    user = User.find_by(name: "Dmitriy")
     project = Project.find_by(name: "Shop")
     project.team << [user, :developer]
   end
 
-  Given 'I own project "Website"' do
+  step 'I own project "Website"' do
     @project = create(:empty_project, name: "Website", namespace: @user.namespace)
     @project.team << [@user, :master]
   end
 
-  And '"Mike" is "Website" reporter' do
+  step '"Mike" is "Website" reporter' do
     user = User.find_by(name: "Mike")
     project = Project.find_by(name: "Website")
     project.team << [user, :reporter]
   end
 
-  And 'I click link "Import team from another project"' do
-    click_link "Import members from another project"
+  step 'I click link "Import team from another project"' do    
+    page.within '.users-project-form' do
+      click_link "Import"
+    end
   end
 
   When 'I submit "Website" project for import team' do
@@ -99,9 +125,32 @@ class ProjectTeamManagement < Spinach::FeatureSteps
     click_button 'Import'
   end
 
-  step 'I click cancel link for "Sam"' do
-    within "#user_#{User.find_by(name: 'Sam').id}" do
-      click_link('Remove user from team')
+  step 'I click cancel link for "Dmitriy"' do
+    project = Project.find_by(name: "Shop")
+    user = User.find_by(name: 'Dmitriy')
+    project_member = project.project_members.find_by(user_id: user.id)
+    page.within "#project_member_#{project_member.id}" do
+      click_link('Remove user from project')
+    end
+  end
+
+  step 'I share project with group "OpenSource"' do
+    project = Project.find_by(name: 'Shop')
+    os_group = create(:group, name: 'OpenSource')
+    create(:empty_project, group: os_group)
+    @os_user1 = create(:user)
+    @os_user2 = create(:user)
+    os_group.add_owner(@os_user1)
+    os_group.add_user(@os_user2, Gitlab::Access::DEVELOPER)
+    share_link = project.project_group_links.new(group_access: Gitlab::Access::MASTER)
+    share_link.group_id = os_group.id
+    share_link.save!
+  end
+
+  step 'I should see "Opensource" group user listing' do
+    page.within '.project-members-groups' do
+      expect(page).to have_content('OpenSource')
+      expect(first('.group_member')).to have_content('Master')
     end
   end
 end

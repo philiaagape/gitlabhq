@@ -1,13 +1,31 @@
 # External issue tracker
 
-GitLab has a great issue tracker but you can also use an external issue tracker such as JIRA or Redmine. This is something that you can turn on per GitLab project. If for example you configure JIRA it provides the following functionality:
+GitLab has a great issue tracker but you can also use an external one such as
+Jira, Redmine, or Bugzilla. Issue trackers are configurable per GitLab project and allow
+you to do the following:
 
-- the 'Issues' link on the GitLab project pages takes you to the appropriate JIRA issue index;
-- clicking 'New issue' on the project dashboard creates a new JIRA issue;
-- To reference JIRA issue PROJECT-1234 in comments, use syntax PROJECT-1234. Commit messages get turned into HTML links to the corresponding JIRA issue.
+- the **Issues** link on the GitLab project pages takes you to the appropriate
+  issue index of the external tracker
+- clicking **New issue** on the project dashboard creates a new issue on the
+  external tracker
 
-![jira screenshot](jira-integration-points.png)
+## Configuration
 
-You can configure the integration in the gitlab.yml configuration file.
+The configuration is done via a project's **Services**.
 
-Support to add your commits to the Jira ticket automatically is [available in GitLab EE](http://doc.gitlab.com/ee/integration/jira.html).
+### Project Service
+
+To enable an external issue tracker you must configure the appropriate **Service**.
+Visit the links below for details:
+
+- [Redmine](../user/project/integrations/redmine.md)
+- [Jira](../user/project/integrations/jira.md)
+- [Bugzilla](../user/project/integrations/bugzilla.md)
+
+### Service Template
+
+To save you the hassle from configuring each project's service individually,
+GitLab provides the ability to set Service Templates which can then be
+overridden in each project's settings.
+
+Read more on [Services Templates](../user/project/integrations/services_templates.md).

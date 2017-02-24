@@ -1,66 +1,40 @@
-# == Schema Information
-#
-# Table name: services
-#
-#  id          :integer          not null, primary key
-#  type        :string(255)
-#  title       :string(255)
-#  token       :string(255)
-#  project_id  :integer          not null
-#  created_at  :datetime
-#  updated_at  :datetime
-#  active      :boolean          default(FALSE), not null
-#  project_url :string(255)
-#  subdomain   :string(255)
-#  room        :string(255)
-#  recipients  :text
-#  api_key     :string(255)
-#
-
-class SlackService < Service
-  validates :room, presence: true, if: :activated?
-  validates :subdomain, presence: true, if: :activated?
-  validates :token, presence: true, if: :activated?
-
+class SlackService < ChatNotificationService
   def title
-    'Slack'
+    'Slack notifications'
   end
 
   def description
-    'A team communication tool for the 21st century'
+    'Receive event notifications in Slack'
   end
 
-  def to_param
+  def self.to_param
     'slack'
   end
 
+  def help
+    'This service sends notifications about projects events to Slack channels.<br />
+    To setup this service:
+    <ol>
+      <li><a href="https://slack.com/apps/A0F7XDUAZ-incoming-webhooks">Add an incoming webhook</a> in your Slack team. The default channel can be overridden for each event. </li>
+      <li>Paste the <strong>Webhook URL</strong> into the field below. </li>
+      <li>Select events below to enable notifications. The channel and username are optional. </li>
+    </ol>'
+  end
+
   def fields
+    default_fields + build_event_channels
+  end
+
+  def default_fields
     [
-      { type: 'text', name: 'subdomain', placeholder: '' },
-      { type: 'text', name: 'token',     placeholder: '' },
-      { type: 'text', name: 'room',      placeholder: 'Ex. #general' },
+      { type: 'text', name: 'webhook', placeholder: 'https://hooks.slack.com/services/...' },
+      { type: 'text', name: 'username', placeholder: 'username' },
+      { type: 'checkbox', name: 'notify_only_broken_builds' },
+      { type: 'checkbox', name: 'notify_only_broken_pipelines' },
     ]
   end
 
-  def execute(push_data)
-    message = SlackMessage.new(push_data.merge(
-      project_url: project_url,
-      project_name: project_name
-    ))
-
-    notifier = Slack::Notifier.new(subdomain, token)
-    notifier.channel = room
-    notifier.username = 'GitLab'
-    notifier.ping(message.pretext, attachments: message.attachments)
-  end
-
-  private
-
-  def project_name
-    project.name_with_namespace.gsub(/\s/, '')
-  end
-
-  def project_url
-    project.web_url
+  def default_channel_placeholder
+    "#general"
   end
 end

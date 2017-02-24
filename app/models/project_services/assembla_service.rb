@@ -1,25 +1,7 @@
-# == Schema Information
-#
-# Table name: services
-#
-#  id          :integer          not null, primary key
-#  type        :string(255)
-#  title       :string(255)
-#  token       :string(255)
-#  project_id  :integer          not null
-#  created_at  :datetime
-#  updated_at  :datetime
-#  active      :boolean          default(FALSE), not null
-#  project_url :string(255)
-#  subdomain   :string(255)
-#  room        :string(255)
-#  recipients  :text
-#  api_key     :string(255)
-#
-
 class AssemblaService < Service
   include HTTParty
 
+  prop_accessor :token, :subdomain
   validates :token, presence: true, if: :activated?
 
   def title
@@ -30,7 +12,7 @@ class AssemblaService < Service
     'Project Management Software (Source Commits Endpoint)'
   end
 
-  def to_param
+  def self.to_param
     'assembla'
   end
 
@@ -41,8 +23,14 @@ class AssemblaService < Service
     ]
   end
 
-  def execute(push)
+  def self.supported_events
+    %w(push)
+  end
+
+  def execute(data)
+    return unless supported_events.include?(data[:object_kind])
+
     url = "https://atlas.assembla.com/spaces/#{subdomain}/github_tool?secret_key=#{token}"
-    AssemblaService.post(url, body: { payload: push }.to_json, headers: { 'Content-Type' => 'application/json' })
+    AssemblaService.post(url, body: { payload: data }.to_json, headers: { 'Content-Type' => 'application/json' })
   end
 end

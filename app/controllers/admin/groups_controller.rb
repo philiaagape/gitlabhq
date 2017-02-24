@@ -1,15 +1,18 @@
 class Admin::GroupsController < Admin::ApplicationController
-  before_filter :group, only: [:edit, :show, :update, :destroy, :project_update, :project_teams_update]
+  before_action :group, only: [:edit, :update, :destroy, :project_update, :members_update]
 
   def index
-    @groups = Group.order('name ASC')
+    @groups = Group.with_statistics.with_route
+    @groups = @groups.sort(@sort = params[:sort])
     @groups = @groups.search(params[:name]) if params[:name].present?
-    @groups = @groups.page(params[:page]).per(20)
+    @groups = @groups.page(params[:page])
   end
 
   def show
-    @members = @group.members.order("group_access DESC").page(params[:members_page]).per(30)
-    @projects = @group.projects.page(params[:projects_page]).per(30)
+    @group = Group.with_statistics.joins(:route).group('routes.path').find_by_full_path(params[:id])
+    @members = @group.members.order("access_level DESC").page(params[:members_page])
+    @requesters = AccessRequestsFinder.new(@group).execute(current_user)
+    @projects = @group.projects.with_statistics.page(params[:projects_page])
   end
 
   def new
@@ -21,7 +24,7 @@ class Admin::GroupsController < Admin::ApplicationController
 
   def create
     @group = Group.new(group_params)
-    @group.path = @group.name.dup.parameterize if @group.name
+    @group.name = @group.path.dup unless @group.name
 
     if @group.save
       @group.add_owner(current_user)
@@ -39,25 +42,37 @@ class Admin::GroupsController < Admin::ApplicationController
     end
   end
 
-  def project_teams_update
-    @group.add_users(params[:user_ids].split(','), params[:group_access])
+  def members_update
+    @group.add_users(params[:user_ids].split(','), params[:access_level], current_user: current_user)
 
     redirect_to [:admin, @group], notice: 'Users were successfully added.'
   end
 
   def destroy
-    @group.destroy
+    Groups::DestroyService.new(@group, current_user).async_execute
 
-    redirect_to admin_groups_path, notice: 'Group was successfully deleted.'
+    redirect_to admin_groups_path, alert: "Group '#{@group.name}' was scheduled for deletion."
   end
 
   private
 
   def group
-    @group = Group.find_by(path: params[:id])
+    @group ||= Group.find_by_full_path(params[:id])
   end
 
   def group_params
-    params.require(:group).permit(:name, :description, :path, :avatar)
+    params.require(:group).permit(group_params_ce)
+  end
+
+  def group_params_ce
+    [
+      :avatar,
+      :description,
+      :lfs_enabled,
+      :name,
+      :path,
+      :request_access_enabled,
+      :visibility_level
+    ]
   end
 end

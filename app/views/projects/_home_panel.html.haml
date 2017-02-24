@@ -1,36 +1,38 @@
 - empty_repo = @project.empty_repo?
-.project-home-panel{:class => ("empty-project" if empty_repo)}
-  .visibility-level-label.has_tooltip{'data-title' => "#{visibility_level_label(@project.visibility_level)} project" }
-    = visibility_level_icon(@project.visibility_level)
-  .row
-    .col-sm-6
-      %h4.project-home-title
-        = @project.name_with_namespace
+.project-home-panel.text-center{ class: ("empty-project" if empty_repo) }
+  %div{ class: container_class }
+    .avatar-container.s70.project-avatar
+      = project_icon(@project, alt: @project.name, class: 'avatar s70 avatar-tile')
+    %h1.project-title
+      = @project.name
+      %span.visibility-icon.has-tooltip{ data: { container: 'body' }, title: visibility_icon_description(@project) }
+        = visibility_level_icon(@project.visibility_level, fw: false)
 
-    .col-sm-6
-      - if current_user && !empty_repo
-        .project-home-dropdown
-          = render "dropdown"
-      = render "shared/clone_panel"
+    .project-home-desc
+      - if @project.description.present?
+        = markdown_field(@project, :description)
 
-  .project-home-extra.row
-    .col-md-7
-      .project-home-desc
-        - if @project.description.present?
-          = auto_link ERB::Util.html_escape(@project.description), link: :urls
-        - if can?(current_user, :admin_project, @project)
-          &ndash;
-          %strong= link_to 'Edit', edit_project_path
-        - elsif !@project.empty_repo? && @repository.readme
-          - readme = @repository.readme
-          &ndash;
-          = link_to project_blob_path(@project, tree_join(@repository.root_ref, readme.name)) do
-            = readme.name
+      - if forked_from_project = @project.forked_from_project
+        %p
+          Forked from
+          = link_to project_path(forked_from_project) do
+            = forked_from_project.namespace.try(:name)
 
-    .col-md-5
-      .project-home-links
-        - unless empty_repo
-          = link_to pluralize(number_with_delimiter(@repository.commit_count), 'commit'), project_commits_path(@project, @ref || @repository.root_ref)
-          = link_to pluralize(number_with_delimiter(@repository.branch_names.count), 'branch'), project_branches_path(@project)
-          = link_to pluralize(number_with_delimiter(@repository.tag_names.count), 'tag'), project_tags_path(@project)
-          %span.light.prepend-left-20= repository_size
+    .project-repo-buttons
+      .count-buttons
+        = render 'projects/buttons/star'
+        = render 'projects/buttons/fork'
+
+      %span.hidden-xs
+        - if @project.feature_available?(:repository, current_user)
+          .project-clone-holder
+            = render "shared/clone_panel"
+
+        - if current_user
+          - if can?(current_user, :download_code, @project)
+            = render 'projects/buttons/download', project: @project, ref: @ref
+            = render 'projects/buttons/dropdown'
+            = render 'projects/buttons/koding'
+
+          = render 'shared/notifications/button', notification_setting: @notification_setting
+          = render 'shared/members/access_request_buttons', source: @project

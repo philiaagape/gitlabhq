@@ -1,5 +1,8 @@
 # Guidelines for shell commands in the GitLab codebase
 
+This document contains guidelines for working with processes and files in the GitLab codebase.
+These guidelines are meant to make your code more reliable _and_ secure.
+
 ## References
 
 - [Google Ruby Security Reviewer's Guide](https://code.google.com/p/ruby-security/wiki/Guide)
@@ -22,9 +25,25 @@ FileUtils.mkdir_p "tmp/special/directory"
 contents = `cat #{filename}`
 # Correct
 contents = File.read(filename)
+
+# Sometimes a shell command is just the best solution. The example below has no
+# user input, and is hard to implement correctly in Ruby: delete all files and
+# directories older than 120 minutes under /some/path, but not /some/path
+# itself.
+Gitlab::Popen.popen(%W(find /some/path -not -path /some/path -mmin +120 -delete))
 ```
 
 This coding style could have prevented CVE-2013-4490.
+
+## Always use the configurable git binary path for git commands
+
+```ruby
+# Wrong
+system(*%W(git branch -d -- #{branch_name}))
+
+# Correct
+system(*%W(#{Gitlab.config.git.bin_path} branch -d -- #{branch_name}))
+```
 
 ## Bypass the shell by splitting commands into separate tokens
 
@@ -72,9 +91,9 @@ In the GitLab codebase, we avoid the option/argument ambiguity by _always_ using
 
 ```ruby
 # Wrong
-system(*%W(git branch -d #{branch_name}))
+system(*%W(#{Gitlab.config.git.bin_path} branch -d #{branch_name}))
 # Correct
-system(*%W(git branch -d -- #{branch_name}))
+system(*%W(#{Gitlab.config.git.bin_path} branch -d -- #{branch_name}))
 ```
 
 This coding style could have prevented CVE-2013-4582.
@@ -85,9 +104,9 @@ Capturing the output of shell commands with backticks reads nicely, but you are 
 
 ```ruby
 # Wrong
-logs = `cd #{repo_dir} && git log`
+logs = `cd #{repo_dir} && #{Gitlab.config.git.bin_path} log`
 # Correct
-logs, exit_status = Gitlab::Popen.popen(%W(git log), repo_dir)
+logs, exit_status = Gitlab::Popen.popen(%W(#{Gitlab.config.git.bin_path} log), repo_dir)
 
 # Wrong
 user = `whoami`
@@ -99,7 +118,102 @@ In other repositories, such as gitlab-shell you can also use `IO.popen`.
 
 ```ruby
 # Safe IO.popen example
-logs = IO.popen(%W(git log), chdir: repo_dir).read
+logs = IO.popen(%W(#{Gitlab.config.git.bin_path} log), chdir: repo_dir) { |p| p.read }
 ```
 
 Note that unlike `Gitlab::Popen.popen`, `IO.popen` does not capture standard error.
+
+## Avoid user input at the start of path strings
+
+Various methods for opening and reading files in Ruby can be used to read the
+standard output of a process instead of a file.  The following two commands do
+roughly the same:
+
+```ruby
+`touch /tmp/pawned-by-backticks`
+File.read('|touch /tmp/pawned-by-file-read')
+```
+
+The key is to open a 'file' whose name starts with a `|`.
+Affected methods include Kernel#open, File::read, File::open, IO::open and IO::read.
+
+You can protect against this behavior of 'open' and 'read' by ensuring that an
+attacker cannot control the start of the filename string you are opening.  For
+instance, the following is sufficient to protect against accidentally starting
+a shell command with `|`:
+
+```ruby
+# we assume repo_path is not controlled by the attacker (user)
+path = File.join(repo_path, user_input)
+# path cannot start with '|' now.
+File.read(path)
+```
+
+If you have to use user input a relative path, prefix `./` to the path.
+
+Prefixing user-supplied paths also offers extra protection against paths
+starting with `-` (see the discussion about using `--` above).
+
+## Guard against path traversal
+
+Path traversal is a security where the program (GitLab) tries to restrict user
+access to a certain directory on disk, but the user manages to open a file
+outside that directory by taking advantage of the `../` path notation.
+
+```ruby
+# Suppose the user gave us a path and they are trying to trick us
+user_input = '../other-repo.git/other-file'
+
+# We look up the repo path somewhere
+repo_path = 'repositories/user-repo.git'
+
+# The intention of the code below is to open a file under repo_path, but
+# because the user used '..' she can 'break out' into
+# 'repositories/other-repo.git'
+full_path = File.join(repo_path, user_input)
+File.open(full_path) do # Oops!
+```
+
+A good way to protect against this is to compare the full path with its
+'absolute path' according to Ruby's `File.absolute_path`.
+
+```ruby
+full_path = File.join(repo_path, user_input)
+if full_path != File.absolute_path(full_path)
+  raise "Invalid path: #{full_path.inspect}"
+end
+
+File.open(full_path) do # Etc.
+```
+
+A check like this could have avoided CVE-2013-4583.
+
+## Properly anchor regular expressions to the start and end of strings
+
+When using regular expressions to validate user input that is passed as an argument to a shell command, make sure to use the `\A` and `\z` anchors that designate the start and end of the string, rather than `^` and `$`, or no anchors at all. 
+
+If you don't, an attacker could use this to execute commands with potentially harmful effect.
+
+For example, when a project's `import_url` is validated like below, the user could trick GitLab into cloning from a Git repository on the local filesystem.
+
+```ruby
+validates :import_url, format: { with: URI.regexp(%w(ssh git http https)) }
+# URI.regexp(%w(ssh git http https)) roughly evaluates to /(ssh|git|http|https):(something_that_looks_like_a_url)/ 
+```
+
+Suppose the user submits the following as their import URL:
+
+```
+file://git:/tmp/lol
+```
+
+Since there are no anchors in the used regular expression, the `git:/tmp/lol` in the value would match, and the validation would pass.
+
+When importing, GitLab would execute the following command, passing the `import_url` as an argument:
+
+
+```sh
+git clone file://git:/tmp/lol
+```
+
+Git would simply ignore the `git:` part, interpret the path as `file:///tmp/lol` and import the repository into the new project, in turn potentially giving the attacker access to any repository in the system, whether private or not.

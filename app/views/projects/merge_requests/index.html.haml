@@ -1,78 +1,23 @@
-- if can? current_user, :write_merge_request, @project
-  = link_to new_project_merge_request_path(@project), class: "pull-right btn btn-new", title: "New Merge Request" do
-    %i.icon-plus
-    New Merge Request
-%h3.page-title
-  Merge Requests
-%hr
-.row
-  .fixed.sidebar-expand-button.hidden-lg.hidden-md
-    %i.icon-list.icon-2x
-  .col-md-3.responsive-side
-    = render 'shared/project_filter', project_entities_path: project_merge_requests_path(@project),
-             labels: true, redirect: 'merge_requests', entity: 'merge_request'
-  .col-md-9
-    .mr-filters.append-bottom-10
-      .dropdown.inline
-        %a.dropdown-toggle.btn{href: '#', "data-toggle" => "dropdown"}
-          %i.icon-user
-          %span.light assignee:
-          - if @assignee.present?
-            %strong= @assignee.name
-          - elsif params[:assignee_id] == "0"
-            Unassigned
-          - else
-            Any
-          %b.caret
-        %ul.dropdown-menu
-          %li
-            = link_to project_filter_path(assignee_id: nil) do
-              Any
-            = link_to project_filter_path(assignee_id: 0) do
-              Unassigned
-          - @assignees.sort_by(&:name).each do |user|
-            %li
-              = link_to project_filter_path(assignee_id: user.id) do
-                = image_tag avatar_icon(user.email), class: "avatar s16", alt: ''
-                = user.name
+- @no_container = true
+- @bulk_edit = can?(current_user, :admin_merge_request, @project)
 
-      .dropdown.inline.prepend-left-10
-        %a.dropdown-toggle.btn{href: '#', "data-toggle" => "dropdown"}
-          %i.icon-time
-          %span.light milestone:
-          - if @milestone.present?
-            %strong= @milestone.title
-          - elsif params[:milestone_id] == "0"
-            None (backlog)
-          - else
-            Any
-          %b.caret
-        %ul.dropdown-menu
-          %li
-            = link_to project_filter_path(milestone_id: nil) do
-              Any
-            = link_to project_filter_path(milestone_id: 0) do
-              None (backlog)
-          - project_active_milestones.each do |milestone|
-            %li
-              = link_to project_filter_path(milestone_id: milestone.id) do
-                %strong= milestone.title
-                %small.light= milestone.expires_at
+- page_title "Merge Requests"
+= render "projects/issues/head"
+= render 'projects/last_push'
 
-      .pull-right
-        = render 'shared/sort_dropdown'
+- content_for :page_specific_javascripts do
+  = page_specific_javascript_bundle_tag('filtered_search')
 
-    .panel.panel-default
-      %ul.well-list.mr-list
-        = render @merge_requests
-        - if @merge_requests.blank?
-          %li
-            .nothing-here-block No merge requests to show
-    - if @merge_requests.present?
-      .pull-right
-        %span.cgray.pull-right #{@merge_requests.total_count} merge requests for this filter
+%div{ class: container_class }
+  .top-area
+    = render 'shared/issuable/nav', type: :merge_requests
+    .nav-controls
+      - merge_project = can?(current_user, :create_merge_request, @project) ? @project : (current_user && current_user.fork_of(@project))
+      - if merge_project
+        = link_to new_namespace_project_merge_request_path(merge_project.namespace, merge_project), class: "btn btn-new", title: "New Merge Request" do
+          New Merge Request
 
-      = paginate @merge_requests, theme: "gitlab"
+  = render 'shared/issuable/search_bar', type: :merge_requests
 
-:javascript
-  $(merge_requestsPage);
+  .merge-requests-holder
+    = render 'merge_requests'

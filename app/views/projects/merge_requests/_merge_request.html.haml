@@ -1,37 +1,61 @@
-%li{ class: mr_css_classes(merge_request) }
-  .merge-request-title
-    %span.light= "##{merge_request.iid}"
-    = link_to_gfm truncate(merge_request.title, length: 80), project_merge_request_path(merge_request.target_project, merge_request), class: "row_title"
-    - if merge_request.merged?
-      %small.pull-right
-        %i.icon-ok
-        = "MERGED"
-    - else
-      %span.pull-right
-        - if merge_request.for_fork?
-          %span.light
-            #{merge_request.source_project_namespace}:
-        = truncate merge_request.source_branch, length: 25
-        %i.icon-angle-right.light
-        = merge_request.target_branch
-  .merge-request-info
-    - if merge_request.author
-      authored by #{link_to_member(merge_request.source_project, merge_request.author)}
-    - if merge_request.votes_count > 0
-      = render 'votes/votes_inline', votable: merge_request
-    - if merge_request.notes.any?
-      %span
-        %i.icon-comments
-        = merge_request.mr_and_commit_notes.count
-    - if merge_request.milestone_id?
-      %span
-        %i.icon-time
-        = merge_request.milestone.title
+%li{ id: dom_id(merge_request), class: mr_css_classes(merge_request), data: { labels: merge_request.label_ids, id: merge_request.id } }
+  - if @bulk_edit
+    .issue-check
+      = check_box_tag dom_id(merge_request, "selected"), nil, false, 'data-id' => merge_request.id, class: "selected_issue"
 
+  .issue-info-container
+    .merge-request-title.title
+      %span.merge-request-title-text
+        = link_to merge_request.title, merge_request_path(merge_request)
+      %ul.controls
+        - if merge_request.merged?
+          %li
+            MERGED
+        - elsif merge_request.closed?
+          %li
+            = icon('ban')
+            CLOSED
 
-    .pull-right
-      %small updated #{time_ago_with_tooltip(merge_request.updated_at, 'bottom', 'merge_request_updated_ago')}
+        - if merge_request.head_pipeline
+          %li
+            = render_pipeline_status(merge_request.head_pipeline)
 
-    .merge-request-labels
-      - merge_request.labels.each do |label|
-        = render_colored_label(label)
+        - if merge_request.open? && merge_request.broken?
+          %li
+            = link_to merge_request_path(merge_request), class: "has-tooltip", title: "Cannot be merged automatically", data: { container: 'body' } do
+              = icon('exclamation-triangle')
+
+        - if merge_request.assignee
+          %li
+            = link_to_member(merge_request.source_project, merge_request.assignee, name: false, title: "Assigned to :name")
+
+        = render 'shared/issuable_meta_data', issuable: merge_request
+
+    .merge-request-info
+      #{issuable_reference(merge_request)} &middot;
+      opened #{time_ago_with_tooltip(merge_request.created_at, placement: 'bottom')}
+      by #{link_to_member(@project, merge_request.author, avatar: false)}
+      - if merge_request.target_project.default_branch != merge_request.target_branch
+        &nbsp;
+        = link_to namespace_project_commits_path(merge_request.project.namespace, merge_request.project, merge_request.target_branch) do
+          = icon('code-fork')
+          = merge_request.target_branch
+
+      - if merge_request.milestone
+        &nbsp;
+        = link_to namespace_project_merge_requests_path(merge_request.project.namespace, merge_request.project, milestone_title: merge_request.milestone.title) do
+          = icon('clock-o')
+          = merge_request.milestone.title
+
+      - if merge_request.labels.any?
+        &nbsp;
+        - merge_request.labels.each do |label|
+          = link_to_label(label, subject: merge_request.project, type: :merge_request, css_class: 'label-link')
+
+      - if merge_request.tasks?
+        &nbsp;
+        %span.task-status
+          = merge_request.task_status
+
+      .pull-right.hidden-xs
+        %span updated #{time_ago_with_tooltip(merge_request.updated_at, placement: 'bottom', html_class: 'merge_request_updated_ago')}

@@ -1,15 +1,33 @@
+require './spec/support/sidekiq'
+
 Gitlab::Seeder.quiet do
-  (2..20).each  do |i|
+  20.times do |i|
     begin
-      User.seed(:id, [{
-        id: i,
-        username: Faker::Internet.user_name,
-        name: Faker::Name.name,
-        email: Faker::Internet.email,
-        confirmed_at: DateTime.now
-      }])
+      User.create!(
+        username: FFaker::Internet.user_name,
+        name: FFaker::Name.name,
+        email: FFaker::Internet.email,
+        confirmed_at: DateTime.now,
+        password: '12345678'
+      )
+
       print '.'
-    rescue ActiveRecord::RecordNotSaved
+    rescue ActiveRecord::RecordInvalid
+      print 'F'
+    end
+  end
+
+  5.times do |i|
+    begin
+      User.create!(
+        username: "user#{i}",
+        name: "User #{i}",
+        email: "user#{i}@example.com",
+        confirmed_at: DateTime.now,
+        password: '12345678'
+      )
+      print '.'
+    rescue ActiveRecord::RecordInvalid
       print 'F'
     end
   end

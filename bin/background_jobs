@@ -1,49 +1,50 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 cd $(dirname $0)/..
 app_root=$(pwd)
 sidekiq_pidfile="$app_root/tmp/pids/sidekiq.pid"
 sidekiq_logfile="$app_root/log/sidekiq.log"
+sidekiq_config="$app_root/config/sidekiq_queues.yml"
 gitlab_user=$(ls -l config.ru | awk '{print $3}')
 
-function warn
+warn()
 {
   echo "$@" 1>&2
 }
 
-function stop
+stop()
 {
   bundle exec sidekiqctl stop $sidekiq_pidfile >> $sidekiq_logfile 2>&1
 }
 
-function killall
+killall()
 {
   pkill -u $gitlab_user -f 'sidekiq [0-9]'
 }
 
-function restart
+restart()
 {
   if [ -f $sidekiq_pidfile ]; then
     stop
   fi
   killall
-  start_sidekiq -d -L $sidekiq_logfile
+  start_sidekiq -d -L $sidekiq_logfile >> $sidekiq_logfile 2>&1
 }
 
-function start_no_deamonize
+start_no_deamonize()
 {
-  start_sidekiq
+  start_sidekiq >> $sidekiq_logfile 2>&1
 }
 
-function start_sidekiq
+start_sidekiq()
 {
-  bundle exec sidekiq -q post_receive -q mailer -q system_hook -q project_web_hook -q gitlab_shell -q common -q default -e $RAILS_ENV -P $sidekiq_pidfile $@ >> $sidekiq_logfile 2>&1
+  exec bundle exec sidekiq -C "${sidekiq_config}" -e $RAILS_ENV -P $sidekiq_pidfile "$@"
 }
 
-function load_ok
+load_ok()
 {
   sidekiq_pid=$(cat $sidekiq_pidfile)
-  if [[ -z $sidekiq_pid ]] ; then
+  if [ -z "$sidekiq_pid" ] ; then
     warn "Could not find a PID in $sidekiq_pidfile"
     exit 0
   fi
@@ -65,6 +66,9 @@ case "$1" in
     ;;
   start_no_deamonize)
     start_no_deamonize
+    ;;
+  start_foreground)
+    start_sidekiq
     ;;
   restart)
     restart

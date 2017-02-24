@@ -1,22 +1,28 @@
 class RepositoryImportWorker
   include Sidekiq::Worker
   include Gitlab::ShellAdapter
+  include DedicatedSidekiqQueue
 
-  sidekiq_options queue: :gitlab_shell
+  attr_accessor :project, :current_user
 
   def perform(project_id)
-    project = Project.find(project_id)
-    result = gitlab_shell.send(:import_repository,
-                               project.path_with_namespace,
-                               project.import_url)
+    @project = Project.find(project_id)
+    @current_user = @project.creator
 
-    if result
-      project.import_finish
-      project.save
-      project.satellite.create unless project.satellite.exists?
-      project.update_repository_size
-    else
-      project.import_fail
+    Gitlab::Metrics.add_event(:import_repository,
+                              import_url: @project.import_url,
+                              path: @project.path_with_namespace)
+
+    project.update_column(:import_error, nil)
+
+    result = Projects::ImportService.new(project, current_user).execute
+
+    if result[:status] == :error
+      project.mark_import_as_failed(result[:message])
+      return
     end
+
+    project.repository.after_import
+    project.import_finish
   end
 end

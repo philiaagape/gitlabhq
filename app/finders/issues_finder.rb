@@ -15,8 +15,30 @@
 #     label_name: string
 #     sort: string
 #
-class IssuesFinder < BaseFinder
+class IssuesFinder < IssuableFinder
   def klass
     Issue
+  end
+
+  private
+
+  def init_collection
+    IssuesFinder.not_restricted_by_confidentiality(current_user)
+  end
+
+  def self.not_restricted_by_confidentiality(user)
+    return Issue.where('issues.confidential IS NULL OR issues.confidential IS FALSE') if user.blank?
+
+    return Issue.all if user.admin?
+
+    Issue.where('
+      issues.confidential IS NULL
+      OR issues.confidential IS FALSE
+      OR (issues.confidential = TRUE
+        AND (issues.author_id = :user_id
+          OR issues.assignee_id = :user_id
+          OR issues.project_id IN(:project_ids)))',
+      user_id: user.id,
+      project_ids: user.authorized_projects(Gitlab::Access::REPORTER).select(:id))
   end
 end

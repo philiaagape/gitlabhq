@@ -1,25 +1,9 @@
-# == Schema Information
-#
-# Table name: services
-#
-#  id          :integer          not null, primary key
-#  type        :string(255)
-#  title       :string(255)
-#  token       :string(255)
-#  project_id  :integer          not null
-#  created_at  :datetime
-#  updated_at  :datetime
-#  active      :boolean          default(FALSE), not null
-#  project_url :string(255)
-#  subdomain   :string(255)
-#  room        :string(255)
-#  recipients  :text
-#  api_key     :string(255)
-#
-
 class PivotaltrackerService < Service
   include HTTParty
 
+  API_ENDPOINT = 'https://www.pivotaltracker.com/services/v5/source_commits'
+
+  prop_accessor :token, :restrict_to_branch
   validates :token, presence: true, if: :activated?
 
   def title
@@ -30,19 +14,35 @@ class PivotaltrackerService < Service
     'Project Management Software (Source Commits Endpoint)'
   end
 
-  def to_param
+  def self.to_param
     'pivotaltracker'
   end
 
   def fields
     [
-      { type: 'text', name: 'token', placeholder: '' }
+      {
+        type: 'text',
+        name: 'token',
+        placeholder: 'Pivotal Tracker API token.'
+      },
+      {
+        type: 'text',
+        name: 'restrict_to_branch',
+        placeholder: 'Comma-separated list of branches which will be ' \
+          'automatically inspected. Leave blank to include all branches.'
+      }
     ]
   end
 
-  def execute(push)
-    url = 'https://www.pivotaltracker.com/services/v5/source_commits'
-    push[:commits].each do |commit|
+  def self.supported_events
+    %w(push)
+  end
+
+  def execute(data)
+    return unless supported_events.include?(data[:object_kind])
+    return unless allowed_branch?(data[:ref])
+
+    data[:commits].each do |commit|
       message = {
         'source_commit' => {
           'commit_id' => commit[:id],
@@ -52,7 +52,7 @@ class PivotaltrackerService < Service
         }
       }
       PivotaltrackerService.post(
-        url,
+        API_ENDPOINT,
         body: message.to_json,
         headers: {
           'Content-Type' => 'application/json',
@@ -60,5 +60,16 @@ class PivotaltrackerService < Service
         }
       )
     end
+  end
+
+  private
+
+  def allowed_branch?(ref)
+    return true unless ref.present? && restrict_to_branch.present?
+
+    branch = Gitlab::Git.ref_name(ref)
+    allowed_branches = restrict_to_branch.split(',').map(&:strip)
+
+    branch.present? && allowed_branches.include?(branch)
   end
 end

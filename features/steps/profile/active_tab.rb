@@ -1,25 +1,25 @@
-class ProfileActiveTab < Spinach::FeatureSteps
+class Spinach::Features::ProfileActiveTab < Spinach::FeatureSteps
   include SharedAuthentication
   include SharedPaths
   include SharedActiveTab
 
-  Then 'the active main tab should be Home' do
+  step 'the active main tab should be Home' do
     ensure_active_main_tab('Profile')
   end
 
-  Then 'the active main tab should be Account' do
+  step 'the active main tab should be Account' do
     ensure_active_main_tab('Account')
   end
 
-  Then 'the active main tab should be SSH Keys' do
+  step 'the active main tab should be SSH Keys' do
     ensure_active_main_tab('SSH Keys')
   end
 
-  Then 'the active main tab should be Design' do
-    ensure_active_main_tab('Design')
+  step 'the active main tab should be Preferences' do
+    ensure_active_main_tab('Preferences')
   end
 
-  Then 'the active main tab should be History' do
-    ensure_active_main_tab('History')
+  step 'the active main tab should be Audit Log' do
+    ensure_active_main_tab('Audit Log')
   end
 end

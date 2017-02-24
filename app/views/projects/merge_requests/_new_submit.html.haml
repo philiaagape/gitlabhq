@@ -1,95 +1,62 @@
 %h3.page-title
-  New merge request
+  New Merge Request
 %p.slead
+  - source_title, target_title = format_mr_branch_names(@merge_request)
   From
-  %strong.label-branch #{@merge_request.source_project_namespace}:#{@merge_request.source_branch}
+  %strong.label-branch= source_title
   %span into
-  %strong.label-branch #{@merge_request.target_project_namespace}:#{@merge_request.target_branch}
+  %strong.label-branch= target_title
 
   %span.pull-right
-    = link_to 'Change branches', new_project_merge_request_path(@project)
+    = link_to 'Change branches', mr_change_branches_path(@merge_request)
+%hr
+= form_for [@project.namespace.becomes(Namespace), @project, @merge_request], html: { class: 'merge-request-form form-horizontal common-note-form js-requires-input js-quick-submit' } do |f|
+  = render 'shared/issuable/form', f: f, issuable: @merge_request, commits: @commits
+  = f.hidden_field :source_project_id
+  = f.hidden_field :source_branch
+  = f.hidden_field :target_project_id
+  = f.hidden_field :target_branch
 
-= form_for [@project, @merge_request], html: { class: "merge-request-form" } do |f|
-  .panel.panel-default
-
-    .panel-body
-      .form-group
-        .light
-          = f.label :title do
-            = "Title *"
-        = f.text_field :title, class: "form-control input-lg js-gfm-input", maxlength: 255, rows: 5, required: true
-      .form-group
-        .light
-          = f.label :description, "Description"
-        = f.text_area :description, class: "form-control js-gfm-input markdown-area", rows: 10
-        .clearfix.hint
-          .pull-left Description is parsed with #{link_to "GitLab Flavored Markdown", help_page_path("markdown", "markdown"), target: '_blank'}.
-          .pull-right Attach images (JPG, PNG, GIF) by dragging & dropping or #{link_to "selecting them", '#', class: 'markdown-selector' }.
-        .error-alert
-      .form-group
-        .issue-assignee
-          = f.label :assignee_id do
-            %i.icon-user
-            Assign to
-          %div
-            = project_users_select_tag('merge_request[assignee_id]', placeholder: 'Select a user', class: 'custom-form-control', selected: @merge_request.assignee_id, project_id: @merge_request.target_project_id)
-            &nbsp;
-            = link_to 'Assign to me', '#', class: 'btn assign-to-me-link'
-      .form-group
-        .issue-milestone
-          = f.label :milestone_id do
-            %i.icon-time
-            Milestone
-          %div= f.select(:milestone_id, milestone_options(@merge_request), { include_blank: "Select milestone" }, {class: 'select2'})
-      .form-group
-        = f.label :label_ids do
-          %i.icon-tag
-          Labels
-        %div
-          = f.collection_select :label_ids, @merge_request.target_project.labels.all, :id, :name, { selected: @merge_request.label_ids }, multiple: true, class: 'select2'
-
-    .panel-footer
-      - if contribution_guide_url(@target_project)
-        %p
-          Please review the
-          %strong #{link_to "guidelines for contribution", contribution_guide_url(@target_project)}
-          to this repository.
-      = f.hidden_field :source_project_id
-      = f.hidden_field :target_project_id
-      = f.hidden_field :target_branch
-      = f.hidden_field :source_branch
-      = f.submit 'Submit merge request', class: "btn btn-create"
-
-.mr-compare
-  %div.panel.panel-default
-    .panel-heading
-      Commits (#{@commits.count})
-    - if @commits.size > MergeRequestDiff::COMMITS_SAFE_SIZE
-      %ul.well-list
-        - Commit.decorate(@commits.first(MergeRequestDiff::COMMITS_SAFE_SIZE)).each do |commit|
-          = render "projects/commits/inline_commit", commit: commit, project: @project
-        %li.warning-row.unstyled
-          other #{@commits.size - MergeRequestDiff::COMMITS_SAFE_SIZE} commits hidden to prevent performance issues.
-    - else
-      %ul.well-list= render Commit.decorate(@commits), project: @project
-
-  %h4 Changes
-  - if @diffs.present?
-    = render "projects/commits/diffs", diffs: @diffs, project: @project
-  - elsif @commits.size > MergeRequestDiff::COMMITS_SAFE_SIZE
-    .bs-callout.bs-callout-danger
-      %h4 This comparison includes more than #{MergeRequestDiff::COMMITS_SAFE_SIZE} commits.
-      %p To preserve performance the line changes are not shown.
+.mr-compare.merge-request
+  - if @commits.empty?
+    .commits-empty
+      %h4
+        There are no commits yet.
+      = custom_icon ('illustration_no_commits')
   - else
-    .bs-callout.bs-callout-danger
-      %h4 This comparison includes huge diff.
-      %p To preserve performance the line changes are not shown.
+    %ul.merge-request-tabs.nav-links.no-top.no-bottom
+      %li.commits-tab.active
+        = link_to url_for(params), data: {target: 'div#commits', action: 'new', toggle: 'tab'} do
+          Commits
+          %span.badge= @commits.size
+      - if @pipelines.any?
+        %li.builds-tab
+          = link_to url_for(params), data: {target: 'div#pipelines', action: 'pipelines', toggle: 'tab'} do
+            Pipelines
+            %span.badge= @pipelines.size
+      %li.diffs-tab
+        = link_to url_for(params.merge(action: 'new_diffs')), data: {target: 'div#diffs', action: 'new/diffs', toggle: 'tab'} do
+          Changes
+          %span.badge= @merge_request.diff_size
 
+    .tab-content
+      #commits.commits.tab-pane.active
+        = render "projects/merge_requests/show/commits"
+      #diffs.diffs.tab-pane
+        -# This tab is always loaded via AJAX
+      - if @pipelines.any?
+        #pipelines.pipelines.tab-pane
+          = render 'projects/merge_requests/show/pipelines', endpoint: url_for(params.merge(format: :json))
+
+  .mr-loading-status
+    = spinner
 
 :javascript
   $('.assign-to-me-link').on('click', function(e){
     $('#merge_request_assignee_id').val("#{current_user.id}").trigger("change");
     e.preventDefault();
   });
-
-  window.project_image_path_upload = "#{upload_image_project_path @project}";
+:javascript
+  var merge_request = new MergeRequest({
+    action: "#{(@show_changes_tab ? 'new/diffs' : 'new')}"
+  });

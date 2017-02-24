@@ -1,49 +1,44 @@
-require_relative "base_service"
-
 module Files
-  class CreateService < BaseService
-    def execute
-      allowed = if project.protected_branch?(ref)
-                  can?(current_user, :push_code_to_protected_branches, project)
-                else
-                  can?(current_user, :push_code, project)
-                end
+  class CreateService < Files::BaseService
+    def commit
+      repository.commit_file(
+        current_user,
+        @file_path,
+        @file_content,
+        message: @commit_message,
+        branch_name: @target_branch,
+        update: false,
+        author_email: @author_email,
+        author_name: @author_name,
+        start_project: @start_project,
+        start_branch_name: @start_branch)
+    end
 
-      unless allowed
-        return error("You are not allowed to create file in this branch")
-      end
+    def validate
+      super
 
-      unless repository.branch_names.include?(ref)
-        return error("You can only create files if you are on top of a branch")
-      end
-
-      file_name = File.basename(path)
-      file_path = path
-
-      unless file_name =~ Gitlab::Regex.path_regex
-        return error(
+      if @file_path =~ Gitlab::Regex.directory_traversal_regex
+        raise_error(
           'Your changes could not be committed, because the file name ' +
-          Gitlab::Regex.path_regex_message
+          Gitlab::Regex.directory_traversal_regex_message
         )
       end
 
-      blob = repository.blob_at_branch(ref, file_path)
-
-      if blob
-        return error("Your changes could not be committed, because file with such name exists")
+      unless @file_path =~ Gitlab::Regex.file_path_regex
+        raise_error(
+          'Your changes could not be committed, because the file name ' +
+          Gitlab::Regex.file_path_regex_message
+        )
       end
 
-      new_file_action = Gitlab::Satellite::NewFileAction.new(current_user, project, ref, file_path)
-      created_successfully = new_file_action.commit!(
-        params[:content],
-        params[:commit_message],
-        params[:encoding]
-      )
+      unless project.empty_repo?
+        @file_path.slice!(0) if @file_path.start_with?('/')
 
-      if created_successfully
-        success
-      else
-        error("Your changes could not be committed, because the file has been changed")
+        blob = repository.blob_at_branch(@start_branch, @file_path)
+
+        if blob
+          raise_error('Your changes could not be committed because a file with the same name already exists')
+        end
       end
     end
   end

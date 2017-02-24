@@ -1,35 +1,36 @@
-class EventFilters < Spinach::FeatureSteps
+class Spinach::Features::EventFilters < Spinach::FeatureSteps
+  include WaitForAjax
   include SharedAuthentication
   include SharedPaths
   include SharedProject
 
-  Then 'I should see push event' do
-    page.should have_selector('span.pushed')
+  step 'I should see push event' do
+    expect(page).to have_selector('span.pushed')
   end
 
-  Then 'I should not see push event' do
-    page.should_not have_selector('span.pushed')
+  step 'I should not see push event' do
+    expect(page).not_to have_selector('span.pushed')
   end
 
-  Then 'I should see new member event' do
-    page.should have_selector('span.joined')
+  step 'I should see new member event' do
+    expect(page).to have_selector('span.joined')
   end
 
-  And 'I should not see new member event' do
-    page.should_not have_selector('span.joined')
+  step 'I should not see new member event' do
+    expect(page).not_to have_selector('span.joined')
   end
 
-  Then 'I should see merge request event' do
-    page.should have_selector('span.accepted')
+  step 'I should see merge request event' do
+    expect(page).to have_selector('span.accepted')
   end
 
-  And 'I should not see merge request event' do
-    page.should_not have_selector('span.accepted')
+  step 'I should not see merge request event' do
+    expect(page).not_to have_selector('span.accepted')
   end
 
-  And 'this project has push event' do
+  step 'this project has push event' do
     data = {
-      before: "0000000000000000000000000000000000000000",
+      before: Gitlab::Git::BLANK_SHA,
       after: "0220c11b9a3e6c69dc8fd35321254ca9a7b98f7e",
       ref: "refs/heads/new_design",
       user_id: @user.id,
@@ -51,8 +52,8 @@ class EventFilters < Spinach::FeatureSteps
     )
   end
 
-  And 'this project has new member event' do
-    user = create(:user, {name: "John Doe"})
+  step 'this project has new member event' do
+    user = create(:user, { name: "John Doe" })
     Event.create(
       project: @project,
       author_id: user.id,
@@ -60,7 +61,7 @@ class EventFilters < Spinach::FeatureSteps
     )
   end
 
-  And 'this project has merge request event' do
+  step 'this project has merge request event' do
     merge_request = create :merge_request, author: @user, source_project: @project, target_project: @project
     Event.create(
       project: @project,
@@ -72,16 +73,20 @@ class EventFilters < Spinach::FeatureSteps
   end
 
   When 'I click "push" event filter' do
-    click_link("push_event_filter")
+    wait_for_ajax
+    click_link("Push events")
+    wait_for_ajax
   end
 
   When 'I click "team" event filter' do
-    click_link("team_event_filter")
+    wait_for_ajax
+    click_link("Team")
+    wait_for_ajax
   end
 
   When 'I click "merge" event filter' do
-    click_link("merged_event_filter")
+    wait_for_ajax
+    click_link("Merge events")
+    wait_for_ajax
   end
-
 end
-

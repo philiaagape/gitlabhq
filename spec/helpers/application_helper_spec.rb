@@ -1,229 +1,273 @@
 require 'spec_helper'
 
 describe ApplicationHelper do
+  include UploadHelpers
+
   describe 'current_controller?' do
-    before do
-      controller.stub(:controller_name).and_return('foo')
+    it 'returns true when controller matches argument' do
+      stub_controller_name('foo')
+
+      expect(helper.current_controller?(:foo)).to eq true
     end
 
-    it "returns true when controller matches argument" do
-      current_controller?(:foo).should be_true
+    it 'returns false when controller does not match argument' do
+      stub_controller_name('foo')
+
+      expect(helper.current_controller?(:bar)).to eq false
     end
 
-    it "returns false when controller does not match argument" do
-      current_controller?(:bar).should_not be_true
+    it 'takes any number of arguments' do
+      stub_controller_name('foo')
+
+      expect(helper.current_controller?(:baz, :bar)).to eq false
+      expect(helper.current_controller?(:baz, :bar, :foo)).to eq true
     end
 
-    it "should take any number of arguments" do
-      current_controller?(:baz, :bar).should_not be_true
-      current_controller?(:baz, :bar, :foo).should be_true
+    def stub_controller_name(value)
+      allow(helper.controller).to receive(:controller_name).and_return(value)
     end
   end
 
   describe 'current_action?' do
-    before do
-      allow(self).to receive(:action_name).and_return('foo')
+    it 'returns true when action matches' do
+      stub_action_name('foo')
+
+      expect(helper.current_action?(:foo)).to eq true
     end
 
-    it "returns true when action matches argument" do
-      current_action?(:foo).should be_true
+    it 'returns false when action does not match' do
+      stub_action_name('foo')
+
+      expect(helper.current_action?(:bar)).to eq false
     end
 
-    it "returns false when action does not match argument" do
-      current_action?(:bar).should_not be_true
+    it 'takes any number of arguments' do
+      stub_action_name('foo')
+
+      expect(helper.current_action?(:baz, :bar)).to eq false
+      expect(helper.current_action?(:baz, :bar, :foo)).to eq true
     end
 
-    it "should take any number of arguments" do
-      current_action?(:baz, :bar).should_not be_true
-      current_action?(:baz, :bar, :foo).should be_true
-    end
-  end
-
-  describe "group_icon" do
-    avatar_file_path = File.join(Rails.root, 'public', 'gitlab_logo.png')
-
-    it "should return an url for the avatar" do
-      group = create(:group)
-      group.avatar = File.open(avatar_file_path)
-      group.save!
-      group_icon(group.path).to_s.should match("/uploads/group/avatar/#{ group.id }/gitlab_logo.png")
-    end
-
-    it "should give default avatar_icon when no avatar is present" do
-      group = create(:group)
-      group.save!
-      group_icon(group.path).should match("group_avatar.png")
+    def stub_action_name(value)
+      allow(helper).to receive(:action_name).and_return(value)
     end
   end
 
-  describe "avatar_icon" do
-    avatar_file_path = File.join(Rails.root, 'public', 'gitlab_logo.png')
+  describe 'project_icon' do
+    it 'returns an url for the avatar' do
+      project = create(:empty_project, avatar: File.open(uploaded_image_temp_path))
 
-    it "should return an url for the avatar" do
-      user = create(:user)
-      user.avatar = File.open(avatar_file_path)
-      user.save!
-      avatar_icon(user.email).to_s.should match("/uploads/user/avatar/#{ user.id }/gitlab_logo.png")
+      avatar_url = "http://#{Gitlab.config.gitlab.host}/uploads/project/avatar/#{project.id}/banana_sample.gif"
+      expect(helper.project_icon("#{project.namespace.to_param}/#{project.to_param}").to_s).
+        to eq "<img src=\"#{avatar_url}\" alt=\"Banana sample\" />"
     end
 
-    it "should call gravatar_icon when no avatar is present" do
-      user = create(:user, email: 'test@example.com')
-      user.save!
-      avatar_icon(user.email).to_s.should == "http://www.gravatar.com/avatar/55502f40dc8b7c769880b10874abc9d0?s=40&d=identicon"
+    it 'gives uploaded icon when present' do
+      project = create(:empty_project)
+
+      allow_any_instance_of(Project).to receive(:avatar_in_git).and_return(true)
+
+      avatar_url = "http://#{Gitlab.config.gitlab.host}#{namespace_project_avatar_path(project.namespace, project)}"
+      expect(helper.project_icon("#{project.namespace.to_param}/#{project.to_param}").to_s).to match(
+        image_tag(avatar_url))
     end
   end
 
-  describe "gravatar_icon" do
+  describe 'avatar_icon' do
+    it 'returns an url for the avatar' do
+      user = create(:user, avatar: File.open(uploaded_image_temp_path))
+
+      expect(helper.avatar_icon(user.email).to_s).
+        to match("/uploads/user/avatar/#{user.id}/banana_sample.gif")
+    end
+
+    it 'returns an url for the avatar with relative url' do
+      stub_config_setting(relative_url_root: '/gitlab')
+      # Must be stubbed after the stub above, and separately
+      stub_config_setting(url: Settings.send(:build_gitlab_url))
+
+      user = create(:user, avatar: File.open(uploaded_image_temp_path))
+
+      expect(helper.avatar_icon(user.email).to_s).
+        to match("/gitlab/uploads/user/avatar/#{user.id}/banana_sample.gif")
+    end
+
+    it 'calls gravatar_icon when no User exists with the given email' do
+      expect(helper).to receive(:gravatar_icon).with('foo@example.com', 20, 2)
+
+      helper.avatar_icon('foo@example.com', 20, 2)
+    end
+
+    describe 'using a User' do
+      it 'returns an URL for the avatar' do
+        user = create(:user, avatar: File.open(uploaded_image_temp_path))
+
+        expect(helper.avatar_icon(user).to_s).
+          to match("/uploads/user/avatar/#{user.id}/banana_sample.gif")
+      end
+    end
+  end
+
+  describe 'gravatar_icon' do
     let(:user_email) { 'user@email.com' }
 
-    it "should return a generic avatar path when Gravatar is disabled" do
-      Gitlab.config.gravatar.stub(:enabled).and_return(false)
-      gravatar_icon(user_email).should match('no_avatar.png')
-    end
+    context 'with Gravatar disabled' do
+      before do
+        stub_application_setting(gravatar_enabled?: false)
+      end
 
-    it "should return a generic avatar path when email is blank" do
-      gravatar_icon('').should match('no_avatar.png')
-    end
-
-    it "should return default gravatar url" do
-      Gitlab.config.gitlab.stub(https: false)
-      gravatar_icon(user_email).should match('http://www.gravatar.com/avatar/b58c6f14d292556214bd64909bcdb118')
-    end
-
-    it "should use SSL when appropriate" do
-      Gitlab.config.gitlab.stub(https: true)
-      gravatar_icon(user_email).should match('https://secure.gravatar.com')
-    end
-
-    it "should return custom gravatar path when gravatar_url is set" do
-      allow(self).to receive(:request).and_return(double(:ssl? => false))
-      Gitlab.config.gravatar.stub(:plain_url).and_return('http://example.local/?s=%{size}&hash=%{hash}')
-      gravatar_icon(user_email, 20).should == 'http://example.local/?s=20&hash=b58c6f14d292556214bd64909bcdb118'
-    end
-
-    it "should accept a custom size" do
-      allow(self).to receive(:request).and_return(double(:ssl? => false))
-      gravatar_icon(user_email, 64).should match(/\?s=64/)
-    end
-
-    it "should use default size when size is wrong" do
-      allow(self).to receive(:request).and_return(double(:ssl? => false))
-      gravatar_icon(user_email, nil).should match(/\?s=40/)
-    end
-
-    it "should be case insensitive" do
-      allow(self).to receive(:request).and_return(double(:ssl? => false))
-      gravatar_icon(user_email).should == gravatar_icon(user_email.upcase + " ")
-    end
-  end
-
-  describe "grouped_options_refs" do
-    # Override Rails' grouped_options_for_select helper since HTML is harder to work with
-    def grouped_options_for_select(options, *args)
-      options
-    end
-
-    let(:options) { grouped_options_refs }
-
-    before do
-      # Must be an instance variable
-      @project = create(:project)
-    end
-
-    it "includes a list of branch names" do
-      options[0][0].should == 'Branches'
-      options[0][1].should include('master', 'feature')
-    end
-
-    it "includes a list of tag names" do
-      options[1][0].should == 'Tags'
-      options[1][1].should include('v1.0.0','v1.1.0')
-    end
-
-    it "includes a specific commit ref if defined" do
-      # Must be an instance variable
-      @ref = '2ed06dc41dbb5936af845b87d79e05bbf24c73b8'
-
-      options[2][0].should == 'Commit'
-      options[2][1].should == [@ref]
-    end
-
-    it "sorts tags in a natural order" do
-      # Stub repository.tag_names to make sure we get some valid testing data
-      expect(@project.repository).to receive(:tag_names).and_return(["v1.0.9", "v1.0.10", "v2.0", "v3.1.4.2", "v1.0.9a"])
-
-      options[1][1].should == ["v3.1.4.2", "v2.0", "v1.0.10", "v1.0.9a", "v1.0.9"]
-    end
-  end
-
-  describe "user_color_scheme_class" do
-    context "with current_user is nil" do
-      it "should return a string" do
-        allow(self).to receive(:current_user).and_return(nil)
-        user_color_scheme_class.should be_kind_of(String)
+      it 'returns a generic avatar' do
+        expect(helper.gravatar_icon(user_email)).to match('no_avatar.png')
       end
     end
 
-    context "with a current_user" do
-      (1..5).each do |color_scheme_id|
-        context "with color_scheme_id == #{color_scheme_id}" do
-          it "should return a string" do
-            current_user = double(:color_scheme_id => color_scheme_id)
-            allow(self).to receive(:current_user).and_return(current_user)
-            user_color_scheme_class.should be_kind_of(String)
-          end
-        end
+    context 'with Gravatar enabled' do
+      before do
+        stub_application_setting(gravatar_enabled?: true)
+      end
+
+      it 'returns a generic avatar when email is blank' do
+        expect(helper.gravatar_icon('')).to match('no_avatar.png')
+      end
+
+      it 'returns a valid Gravatar URL' do
+        stub_config_setting(https: false)
+
+        expect(helper.gravatar_icon(user_email)).
+          to match('http://www.gravatar.com/avatar/b58c6f14d292556214bd64909bcdb118')
+      end
+
+      it 'uses HTTPs when configured' do
+        stub_config_setting(https: true)
+
+        expect(helper.gravatar_icon(user_email)).
+          to match('https://secure.gravatar.com')
+      end
+
+      it 'returns custom gravatar path when gravatar_url is set' do
+        stub_gravatar_setting(plain_url: 'http://example.local/?s=%{size}&hash=%{hash}')
+
+        expect(gravatar_icon(user_email, 20)).
+          to eq('http://example.local/?s=40&hash=b58c6f14d292556214bd64909bcdb118')
+      end
+
+      it 'accepts a custom size argument' do
+        expect(helper.gravatar_icon(user_email, 64)).to include '?s=128'
+      end
+
+      it 'defaults size to 40@2x when given an invalid size' do
+        expect(helper.gravatar_icon(user_email, nil)).to include '?s=80'
+      end
+
+      it 'accepts a scaling factor' do
+        expect(helper.gravatar_icon(user_email, 40, 3)).to include '?s=120'
+      end
+
+      it 'ignores case and surrounding whitespace' do
+        normal = helper.gravatar_icon('foo@example.com')
+        upcase = helper.gravatar_icon(' FOO@EXAMPLE.COM ')
+
+        expect(normal).to eq upcase
       end
     end
   end
 
-  describe "simple_sanitize" do
+  describe 'simple_sanitize' do
     let(:a_tag) { '<a href="#">Foo</a>' }
 
-    it "allows the a tag" do
-      simple_sanitize(a_tag).should == a_tag
+    it 'allows the a tag' do
+      expect(helper.simple_sanitize(a_tag)).to eq(a_tag)
     end
 
-    it "allows the span tag" do
+    it 'allows the span tag' do
       input = '<span class="foo">Bar</span>'
-      simple_sanitize(input).should == input
+      expect(helper.simple_sanitize(input)).to eq(input)
     end
 
-    it "disallows other tags" do
+    it 'disallows other tags' do
       input = "<strike><b>#{a_tag}</b></strike>"
-      simple_sanitize(input).should == a_tag
+      expect(helper.simple_sanitize(input)).to eq(a_tag)
     end
   end
 
-  describe "link_to" do
+  describe 'time_ago_with_tooltip' do
+    def element(*arguments)
+      Time.zone = 'UTC'
+      time = Time.zone.parse('2015-07-02 08:23')
+      element = helper.time_ago_with_tooltip(time, *arguments)
 
-    it "should not include rel=nofollow for internal links" do
-      expect(link_to("Home", root_path)).to eq("<a href=\"/\">Home</a>")
+      Nokogiri::HTML::DocumentFragment.parse(element).first_element_child
     end
 
-    it "should include rel=nofollow for external links" do
-      expect(link_to("Example", "http://www.example.com")).to eq("<a href=\"http://www.example.com\" rel=\"nofollow\">Example</a>")
+    it 'returns a time element' do
+      expect(element.name).to eq 'time'
     end
 
-    it "should include re=nofollow for external links and honor existing html_options" do
-      expect(
-        link_to("Example", "http://www.example.com", class: "toggle", data: {toggle: "dropdown"})
-      ).to eq("<a class=\"toggle\" data-toggle=\"dropdown\" href=\"http://www.example.com\" rel=\"nofollow\">Example</a>")
+    it 'includes the date string' do
+      expect(element.text).to eq '2015-07-02 08:23:00 UTC'
     end
 
-    it "should include rel=nofollow for external links and preserver other rel values" do
-      expect(
-        link_to("Example", "http://www.example.com", rel: "noreferrer")
-      ).to eq("<a href=\"http://www.example.com\" rel=\"noreferrer nofollow\">Example</a>")
+    it 'has a datetime attribute' do
+      expect(element.attr('datetime')).to eq '2015-07-02T08:23:00Z'
+    end
+
+    it 'has a formatted title attribute' do
+      expect(element.attr('title')).to eq 'Jul 2, 2015 8:23am'
+    end
+
+    it 'includes a default js-timeago class' do
+      expect(element.attr('class')).to eq 'js-timeago'
+    end
+
+    it 'accepts a custom html_class' do
+      expect(element(html_class: 'custom_class').attr('class')).
+        to eq 'js-timeago custom_class'
+    end
+
+    it 'accepts a custom tooltip placement' do
+      expect(element(placement: 'bottom').attr('data-placement')).to eq 'bottom'
+    end
+
+    it 'converts to Time' do
+      expect { helper.time_ago_with_tooltip(Date.today) }.not_to raise_error
+    end
+
+    it 'add class for the short format' do
+      timeago_element = element(short_format: 'short')
+      expect(timeago_element.attr('class')).to eq 'js-short-timeago'
+      expect(timeago_element.next_element).to eq nil
     end
   end
 
-  describe 'markup_render' do
+  describe 'render_markup' do
     let(:content) { 'Noël' }
-
-    it 'should preserve encoding' do
-      content.encoding.name.should == 'UTF-8'
-      expect(render_markup('foo.rst', content).encoding.name).to eq('UTF-8')
+    let(:user) { create(:user) }
+    before do
+      allow(helper).to receive(:current_user).and_return(user)
     end
+
+    it 'preserves encoding' do
+      expect(content.encoding.name).to eq('UTF-8')
+      expect(helper.render_markup('foo.rst', content).encoding.name).to eq('UTF-8')
+    end
+
+    it "delegates to #markdown when file name corresponds to Markdown" do
+      expect(helper).to receive(:gitlab_markdown?).with('foo.md').and_return(true)
+      expect(helper).to receive(:markdown).and_return('NOEL')
+
+      expect(helper.render_markup('foo.md', content)).to eq('NOEL')
+    end
+
+    it "delegates to #asciidoc when file name corresponds to AsciiDoc" do
+      expect(helper).to receive(:asciidoc?).with('foo.adoc').and_return(true)
+      expect(helper).to receive(:asciidoc).and_return('NOEL')
+
+      expect(helper.render_markup('foo.adoc', content)).to eq('NOEL')
+    end
+  end
+
+  describe '#active_when' do
+    it { expect(helper.active_when(true)).to eq('active') }
+    it { expect(helper.active_when(false)).to eq(nil) }
   end
 end

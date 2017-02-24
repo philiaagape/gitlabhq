@@ -5,19 +5,24 @@ module Projects
     end
 
     def execute
+      forked_from_project_id = params.delete(:forked_from_project_id)
+      import_data = params.delete(:import_data)
+      @skip_wiki = params.delete(:skip_wiki)
+
       @project = Project.new(params)
 
-      # Reset visibility levet if is not allowed to set it
+      # Make sure that the user is allowed to use the specified visibility level
       unless Gitlab::VisibilityLevel.allowed_for?(current_user, params[:visibility_level])
-        @project.visibility_level = default_features.visibility_level
+        deny_visibility_level(@project)
+        return @project
       end
 
-      # Parametrize path for project
-      #
-      # Ex.
-      #  'GitLab HQ'.parameterize => "gitlab-hq"
-      #
-      @project.path = @project.name.dup.parameterize unless @project.path.present?
+      unless allowed_fork?(forked_from_project_id)
+        @project.errors.add(:forked_from_project_id, 'is forbidden')
+        return @project
+      end
+
+      set_project_name_from_path
 
       # get namespace id
       namespace_id = params[:namespace_id]
@@ -37,44 +42,24 @@ module Projects
 
       @project.creator = current_user
 
-      if @project.save
-        log_info("#{@project.owner.name} created a new project \"#{@project.name_with_namespace}\"")
-        system_hook_service.execute_hooks_for(@project, :create)
-
-        unless @project.group
-          @project.users_projects.create(
-            project_access: UsersProject::MASTER,
-            user: current_user
-          )
-        end
-
-        @project.update_column(:last_activity_at, @project.created_at)
-
-        if @project.import?
-          @project.import_start
-        else
-          GitlabShellWorker.perform_async(
-            :add_repository,
-            @project.path_with_namespace
-          )
-        end
-
-        if @project.wiki_enabled?
-          begin
-            # force the creation of a wiki,
-            ProjectWiki.new(@project, @project.owner).wiki
-          rescue ProjectWiki::CouldNotCreateWikiError => ex
-            # Prevent project observer crash
-            # if failed to create wiki
-            nil
-          end
-        end
+      if forked_from_project_id
+        @project.build_forked_project_link(forked_from_project_id: forked_from_project_id)
       end
 
+      save_project_and_import_data(import_data)
+
+      @project.import_start if @project.import?
+
+      after_create_actions if @project.persisted?
+
+      if @project.errors.empty?
+        @project.add_import_job if @project.import?
+      else
+        fail(error: @project.errors.full_messages.join(', '))
+      end
       @project
-    rescue => ex
-      @project.errors.add(:base, "Can't save project. Please try again later")
-      @project
+    rescue => e
+      fail(error: e.message)
     end
 
     protected
@@ -83,9 +68,85 @@ module Projects
       @project.errors.add(:namespace, "is not valid")
     end
 
+    def allowed_fork?(source_project_id)
+      return true if source_project_id.nil?
+
+      source_project = Project.find_by(id: source_project_id)
+      current_user.can?(:fork_project, source_project)
+    end
+
     def allowed_namespace?(user, namespace_id)
       namespace = Namespace.find_by(id: namespace_id)
       current_user.can?(:create_projects, namespace)
+    end
+
+    def after_create_actions
+      log_info("#{@project.owner.name} created a new project \"#{@project.name_with_namespace}\"")
+
+      unless @project.gitlab_project_import?
+        @project.create_wiki unless skip_wiki?
+        create_services_from_active_templates(@project)
+
+        @project.create_labels
+      end
+
+      event_service.create_project(@project, current_user)
+      system_hook_service.execute_hooks_for(@project, :create)
+
+      unless @project.group || @project.gitlab_project_import?
+        @project.team << [current_user, :master, current_user]
+      end
+
+      @project.group&.refresh_members_authorized_projects
+    end
+
+    def skip_wiki?
+      !@project.feature_available?(:wiki, current_user) || @skip_wiki
+    end
+
+    def save_project_and_import_data(import_data)
+      Project.transaction do
+        @project.create_or_update_import_data(data: import_data[:data], credentials: import_data[:credentials]) if import_data
+
+        if @project.save && !@project.import?
+          raise 'Failed to create repository' unless @project.create_repository
+        end
+      end
+    end
+
+    def fail(error:)
+      message = "Unable to save project. Error: #{error}"
+      message << "Project ID: #{@project.id}" if @project && @project.id
+
+      Rails.logger.error(message)
+
+      if @project && @project.import?
+        @project.errors.add(:base, message)
+        @project.mark_import_as_failed(message)
+      end
+
+      @project
+    end
+
+    def create_services_from_active_templates(project)
+      Service.where(template: true, active: true).each do |template|
+        service = Service.build_from_template(project.id, template)
+        service.save!
+      end
+    end
+
+    def set_project_name_from_path
+      # Set project name from path
+      if @project.name.present? && @project.path.present?
+        # if both name and path set - everything is ok
+      elsif @project.path.present?
+        # Set project name from path
+        @project.name = @project.path.dup
+      elsif @project.name.present?
+        # For compatibility - set path from name
+        # TODO: remove this in 8.0
+        @project.path = @project.name.dup.parameterize
+      end
     end
   end
 end

@@ -2,13 +2,15 @@
 class Projects::BlameController < Projects::ApplicationController
   include ExtractsPath
 
-  # Authorize
-  before_filter :authorize_read_project!
-  before_filter :authorize_code_access!
-  before_filter :require_non_empty_project
+  before_action :require_non_empty_project
+  before_action :assign_ref_vars
+  before_action :authorize_download_code!
 
   def show
     @blob = @repository.blob_at(@commit.id, @path)
-    @blame = Gitlab::Git::Blame.new(project.repository, @commit.id, @path)
+    
+    return render_404 unless @blob
+
+    @blame_groups = Gitlab::Blame.new(@blob, @commit).groups
   end
 end

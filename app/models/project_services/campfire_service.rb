@@ -1,23 +1,7 @@
-# == Schema Information
-#
-# Table name: services
-#
-#  id          :integer          not null, primary key
-#  type        :string(255)
-#  title       :string(255)
-#  token       :string(255)
-#  project_id  :integer          not null
-#  created_at  :datetime
-#  updated_at  :datetime
-#  active      :boolean          default(FALSE), not null
-#  project_url :string(255)
-#  subdomain   :string(255)
-#  room        :string(255)
-#  recipients  :text
-#  api_key     :string(255)
-#
-
 class CampfireService < Service
+  include HTTParty
+
+  prop_accessor :token, :subdomain, :room
   validates :token, presence: true, if: :activated?
 
   def title
@@ -28,7 +12,7 @@ class CampfireService < Service
     'Simple web-based real-time group chat'
   end
 
-  def to_param
+  def self.to_param
     'campfire'
   end
 
@@ -40,23 +24,64 @@ class CampfireService < Service
     ]
   end
 
-  def execute(push_data)
-    room = gate.find_room_by_name(self.room)
-    return true unless room
+  def self.supported_events
+    %w(push)
+  end
 
-    message = build_message(push_data)
+  def execute(data)
+    return unless supported_events.include?(data[:object_kind])
 
-    room.speak(message)
+    self.class.base_uri base_uri
+    message = build_message(data)
+    speak(self.room, message, auth)
   end
 
   private
 
-  def gate
-    @gate ||= Tinder::Campfire.new(subdomain, token: token)
+  def base_uri
+    @base_uri ||= "https://#{subdomain}.campfirenow.com"
+  end
+
+  def auth
+    # use a dummy password, as explained in the Campfire API doc:
+    # https://github.com/basecamp/campfire-api#authentication
+    @auth ||= {
+      basic_auth: {
+        username: token,
+        password: 'X'
+      }
+    }
+  end
+
+  # Post a message into a room, returns the message Hash in case of success.
+  # Returns nil otherwise.
+  # https://github.com/basecamp/campfire-api/blob/master/sections/messages.md#create-message
+  def speak(room_name, message, auth)
+    room = rooms(auth).find { |r| r["name"] == room_name }
+    return nil unless room
+
+    path = "/room/#{room["id"]}/speak.json"
+    body = {
+      body: {
+        message: {
+          type: 'TextMessage',
+          body: message
+        }
+      }
+    }
+    res = self.class.post(path, auth.merge(body))
+    res.code == 201 ? res : nil
+  end
+
+  # Returns a list of rooms, or [].
+  # https://github.com/basecamp/campfire-api/blob/master/sections/rooms.md#get-rooms
+  def rooms(auth)
+    res = self.class.get("/rooms.json", auth) 
+    res.code == 200 ? res["rooms"] : []
   end
 
   def build_message(push)
-    ref = push[:ref].gsub("refs/heads/", "")
+    ref = Gitlab::Git.ref_name(push[:ref])
     before = push[:before]
     after = push[:after]
 
@@ -64,9 +89,9 @@ class CampfireService < Service
     message << "[#{project.name_with_namespace}] "
     message << "#{push[:user_name]} "
 
-    if before =~ /000000/
+    if Gitlab::Git.blank_ref?(before)
       message << "pushed new branch #{ref} \n"
-    elsif after =~ /000000/
+    elsif Gitlab::Git.blank_ref?(after)
       message << "removed branch #{ref} \n"
     else
       message << "pushed #{push[:total_commits_count]} commits to #{ref}. "

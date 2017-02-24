@@ -1,68 +1,31 @@
-%ul.nav.nav-tabs.log-tabs
-  %li.active
-    = link_to "githost.log", "#githost", 'data-toggle' => 'tab'
-  %li
-    = link_to "application.log", "#application", 'data-toggle' => 'tab'
-  %li
-    = link_to "production.log", "#production", 'data-toggle' => 'tab'
-  %li
-    = link_to "sidekiq.log", "#sidekiq", 'data-toggle' => 'tab'
+- @no_container = true
+- page_title "Logs"
+- loggers = [Gitlab::GitLogger, Gitlab::AppLogger,
+             Gitlab::EnvironmentLogger, Gitlab::SidekiqLogger,
+             Gitlab::RepositoryCheckLogger]
+= render 'admin/background_jobs/head'
 
-%p.light To prevent performance issues admin logs output the last 2000 lines
-.tab-content
-  .tab-pane.active#githost
-    .file-holder#README
-      .file-title
-        %i.icon-file
-        githost.log
-        .pull-right
-          = link_to '#', class: 'log-bottom' do
-            %i.icon-arrow-down
-            Scroll down
-      .file-content.logs
-        %ol
-          - Gitlab::GitLogger.read_latest.each do |line|
-            %li
-              %p= line
-  .tab-pane#application
-    .file-holder#README
-      .file-title
-        %i.icon-file
-        application.log
-        .pull-right
-          = link_to '#', class: 'log-bottom' do
-            %i.icon-arrow-down
-            Scroll down
-      .file-content.logs
-        %ol
-          - Gitlab::AppLogger.read_latest.each do |line|
-            %li
-              %p= line
-  .tab-pane#production
-    .file-holder#README
-      .file-title
-        %i.icon-file
-        production.log
-        .pull-right
-          = link_to '#', class: 'log-bottom' do
-            %i.icon-arrow-down
-            Scroll down
-      .file-content.logs
-        %ol
-          - Gitlab::Logger.read_latest_for('production.log').each do |line|
-            %li
-              %p= line
-  .tab-pane#sidekiq
-    .file-holder#README
-      .file-title
-        %i.icon-file
-        sidekiq.log
-        .pull-right
-          = link_to '#', class: 'log-bottom' do
-            %i.icon-arrow-down
-            Scroll down
-      .file-content.logs
-        %ol
-          - Gitlab::Logger.read_latest_for('sidekiq.log').each do |line|
-            %li
-              %p= line
+%div{ class: container_class }
+  %ul.nav-links.log-tabs
+    - loggers.each do |klass|
+      %li{ class: active_when(klass == Gitlab::GitLogger) }>
+        = link_to klass::file_name, "##{klass::file_name_noext}",
+            'data-toggle' => 'tab'
+  .row-content-block
+    To prevent performance issues admin logs output the last 2000 lines
+  .tab-content
+    - loggers.each do |klass|
+      .tab-pane{ class: active_when(klass == Gitlab::GitLogger), id: klass::file_name_noext }
+        .file-holder#README
+          .js-file-title.file-title
+            %i.fa.fa-file
+            = klass::file_name
+            .pull-right
+              = link_to '#', class: 'log-bottom' do
+                %i.fa.fa-arrow-down
+                Scroll down
+          .file-content.logs
+            %ol
+              - klass.read_latest.each do |line|
+                %li
+                  %p= line

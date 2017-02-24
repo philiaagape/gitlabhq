@@ -1,224 +1,449 @@
 require 'spec_helper'
 
 describe "Internal Project Access", feature: true  do
+  include AccessMatchers
+
   let(:project) { create(:project, :internal) }
 
-  let(:master) { create(:user) }
-  let(:guest) { create(:user) }
-  let(:reporter) { create(:user) }
-
-  before do
-    # full access
-    project.team << [master, :master]
-
-    # readonly
-    project.team << [reporter, :reporter]
-  end
-
   describe "Project should be internal" do
-    subject { project }
-
-    its(:internal?) { should be_true }
+    describe '#internal?' do
+      subject { project.internal? }
+      it { is_expected.to be_truthy }
+    end
   end
 
   describe "GET /:project_path" do
-    subject { project_path(project) }
+    subject { namespace_project_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/tree/master" do
-    subject { project_tree_path(project, project.repository.root_ref) }
+    subject { namespace_project_tree_path(project.namespace, project, project.repository.root_ref) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/commits/master" do
-    subject { project_commits_path(project, project.repository.root_ref, limit: 1) }
+    subject { namespace_project_commits_path(project.namespace, project, project.repository.root_ref, limit: 1) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/commit/:sha" do
-    subject { project_commit_path(project, project.repository.commit) }
+    subject { namespace_project_commit_path(project.namespace, project, project.repository.commit) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/compare" do
-    subject { project_compare_index_path(project) }
+    subject { namespace_project_compare_index_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
-  describe "GET /:project_path/team" do
-    subject { project_team_index_path(project) }
+  describe "GET /:project_path/settings/members" do
+    subject { namespace_project_settings_members_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_denied_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:visitor) }
+    it { is_expected.to be_denied_for(:external) }
+  end
+
+  describe "GET /:project_path/settings/ci_cd" do
+    subject { namespace_project_settings_ci_cd_path(project.namespace, project) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_denied_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:visitor) }
+    it { is_expected.to be_denied_for(:external) }
   end
 
   describe "GET /:project_path/blob" do
-    before do
-      commit = project.repository.commit
-      path = commit.tree.contents.select { |i| i.is_a?(Grit::Blob) }.first.name
-      @blob_path = project_blob_path(project, File.join(commit.id, path))
-    end
+    let(:commit) { project.repository.commit }
+    subject { namespace_project_blob_path(project.namespace, project, File.join(commit.id, '.gitignore')) }
 
-    it { @blob_path.should be_allowed_for master }
-    it { @blob_path.should be_allowed_for reporter }
-    it { @blob_path.should be_allowed_for :admin }
-    it { @blob_path.should be_allowed_for guest }
-    it { @blob_path.should be_allowed_for :user }
-    it { @blob_path.should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/edit" do
-    subject { edit_project_path(project) }
+    subject { edit_namespace_project_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_denied_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_denied_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/deploy_keys" do
-    subject { project_deploy_keys_path(project) }
+    subject { namespace_project_deploy_keys_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_denied_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_denied_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/issues" do
-    subject { project_issues_path(project) }
+    subject { namespace_project_issues_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/issues/:id/edit" do
+    let(:issue) { create(:issue, project: project) }
+    subject { edit_namespace_project_issue_path(project.namespace, project, issue) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/snippets" do
-    subject { project_snippets_path(project) }
+    subject { namespace_project_snippets_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/snippets/new" do
-    subject { new_project_snippet_path(project) }
+    subject { new_namespace_project_snippet_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/merge_requests" do
-    subject { project_merge_requests_path(project) }
+    subject { namespace_project_merge_requests_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/merge_requests/new" do
-    subject { new_project_merge_request_path(project) }
+    subject { new_namespace_project_merge_request_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_denied_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/branches" do
-    subject { project_branches_path(project) }
+    subject { namespace_project_branches_path(project.namespace, project) }
 
     before do
       # Speed increase
-      Project.any_instance.stub(:branches).and_return([])
+      allow_any_instance_of(Project).to receive(:branches).and_return([])
     end
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
   describe "GET /:project_path/tags" do
-    subject { project_tags_path(project) }
+    subject { namespace_project_tags_path(project.namespace, project) }
 
     before do
       # Speed increase
-      Project.any_instance.stub(:tags).and_return([])
+      allow_any_instance_of(Project).to receive(:tags).and_return([])
     end
 
-    it { should be_allowed_for master }
-    it { should be_allowed_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_allowed_for guest }
-    it { should be_allowed_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 
-  describe "GET /:project_path/hooks" do
-    subject { project_hooks_path(project) }
+  describe "GET /:project_path/settings/integrations" do
+    subject { namespace_project_settings_integrations_path(project.namespace, project) }
 
-    it { should be_allowed_for master }
-    it { should be_denied_for reporter }
-    it { should be_allowed_for :admin }
-    it { should be_denied_for guest }
-    it { should be_denied_for :user }
-    it { should be_denied_for :visitor }
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_denied_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/pipelines" do
+    subject { namespace_project_pipelines_path(project.namespace, project) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/pipelines/:id" do
+    let(:pipeline) { create(:ci_pipeline, project: project) }
+    subject { namespace_project_pipeline_path(project.namespace, project, pipeline) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/builds" do
+    subject { namespace_project_builds_path(project.namespace, project) }
+
+    context "when allowed for public and internal" do
+      before { project.update(public_builds: true) }
+
+      it { is_expected.to be_allowed_for(:admin) }
+      it { is_expected.to be_allowed_for(:owner).of(project) }
+      it { is_expected.to be_allowed_for(:master).of(project) }
+      it { is_expected.to be_allowed_for(:developer).of(project) }
+      it { is_expected.to be_allowed_for(:reporter).of(project) }
+      it { is_expected.to be_allowed_for(:guest).of(project) }
+      it { is_expected.to be_allowed_for(:user) }
+      it { is_expected.to be_denied_for(:external) }
+      it { is_expected.to be_denied_for(:visitor) }
+    end
+
+    context "when disallowed for public and internal" do
+      before { project.update(public_builds: false) }
+
+      it { is_expected.to be_allowed_for(:admin) }
+      it { is_expected.to be_allowed_for(:owner).of(project) }
+      it { is_expected.to be_allowed_for(:master).of(project) }
+      it { is_expected.to be_allowed_for(:developer).of(project) }
+      it { is_expected.to be_allowed_for(:reporter).of(project) }
+      it { is_expected.to be_denied_for(:guest).of(project) }
+      it { is_expected.to be_denied_for(:user) }
+      it { is_expected.to be_denied_for(:external) }
+      it { is_expected.to be_denied_for(:visitor) }
+    end
+  end
+
+  describe "GET /:project_path/builds/:id" do
+    let(:pipeline) { create(:ci_pipeline, project: project) }
+    let(:build) { create(:ci_build, pipeline: pipeline) }
+    subject { namespace_project_build_path(project.namespace, project, build.id) }
+
+    context "when allowed for public and internal" do
+      before { project.update(public_builds: true) }
+
+      it { is_expected.to be_allowed_for(:admin) }
+      it { is_expected.to be_allowed_for(:owner).of(project) }
+      it { is_expected.to be_allowed_for(:master).of(project) }
+      it { is_expected.to be_allowed_for(:developer).of(project) }
+      it { is_expected.to be_allowed_for(:reporter).of(project) }
+      it { is_expected.to be_allowed_for(:guest).of(project) }
+      it { is_expected.to be_allowed_for(:user) }
+      it { is_expected.to be_denied_for(:external) }
+      it { is_expected.to be_denied_for(:visitor) }
+    end
+
+    context "when disallowed for public and internal" do
+      before { project.update(public_builds: false) }
+
+      it { is_expected.to be_allowed_for(:admin) }
+      it { is_expected.to be_allowed_for(:owner).of(project) }
+      it { is_expected.to be_allowed_for(:master).of(project) }
+      it { is_expected.to be_allowed_for(:developer).of(project) }
+      it { is_expected.to be_allowed_for(:reporter).of(project) }
+      it { is_expected.to be_denied_for(:guest).of(project) }
+      it { is_expected.to be_denied_for(:user) }
+      it { is_expected.to be_denied_for(:external) }
+      it { is_expected.to be_denied_for(:visitor) }
+    end
+  end
+
+  describe "GET /:project_path/environments" do
+    subject { namespace_project_environments_path(project.namespace, project) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/environments/:id" do
+    let(:environment) { create(:environment, project: project) }
+    subject { namespace_project_environment_path(project.namespace, project, environment) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/environments/new" do
+    subject { new_namespace_project_environment_path(project.namespace, project) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_denied_for(:reporter).of(project) }
+    it { is_expected.to be_denied_for(:guest).of(project) }
+    it { is_expected.to be_denied_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
+  end
+
+  describe "GET /:project_path/container_registry" do
+    before do
+      stub_container_registry_tags('latest')
+      stub_container_registry_config(enabled: true)
+    end
+
+    subject { namespace_project_container_registry_index_path(project.namespace, project) }
+
+    it { is_expected.to be_allowed_for(:admin) }
+    it { is_expected.to be_allowed_for(:owner).of(project) }
+    it { is_expected.to be_allowed_for(:master).of(project) }
+    it { is_expected.to be_allowed_for(:developer).of(project) }
+    it { is_expected.to be_allowed_for(:reporter).of(project) }
+    it { is_expected.to be_allowed_for(:guest).of(project) }
+    it { is_expected.to be_allowed_for(:user) }
+    it { is_expected.to be_denied_for(:external) }
+    it { is_expected.to be_denied_for(:visitor) }
   end
 end
